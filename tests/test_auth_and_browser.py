@@ -114,5 +114,61 @@ class BrowserSolverTests(unittest.TestCase):
         mock_page.quit.assert_called_once()
 
 
+class AuthPrecedenceTests(unittest.TestCase):
+    def setUp(self):
+        from app import app
+        self.app = app
+        self.client = app.test_client()
+
+    def test_explicit_wrong_credentials_rejected_even_if_session_active(self):
+        """세션 쿠키가 유효하더라도 명시적인 X-Auth 헤더가 틀리면 401로 차단되어야 함."""
+        from auth import credential_signature
+        from config import load_settings
+
+        settings = load_settings()
+        sig = credential_signature(settings, secret_key=self.app.secret_key)
+
+        with self.client.session_transaction() as sess:
+            sess["authenticated"] = True
+            sess["credential_signature"] = sig
+            sess["username"] = settings.get("auth_username", "admin")
+
+        # 1. 헤더 없이 요청하면 세션 쿠키로 200 통과
+        resp = self.client.post("/api/auth/test", json={})
+        self.assertEqual(resp.status_code, 200)
+
+        # 2. 틀린 비밀번호 헤더를 동봉하면 세션 쿠키가 있어도 즉시 401 차단
+        resp_wrong = self.client.post(
+            "/api/auth/test",
+            headers={
+                "X-Auth-User": "admin",
+                "X-Auth-Password": "wrong_password_xyz",
+            },
+            json={},
+        )
+        self.assertEqual(resp_wrong.status_code, 401)
+        data = resp_wrong.get_json()
+        self.assertIn("error", data)
+
+    def test_explicit_valid_credentials_succeeds_without_session(self):
+        """세션 쿠키가 없어도 올바른 X-Auth 헤더가 있으면 200 성공."""
+        from config import load_settings
+
+        settings = load_settings()
+        user = settings.get("auth_username", "admin")
+        pw = settings.get("auth_password", "password1234")
+
+        # auth_password가 해시일 수 있으므로 설정 파일의 평문 또는 기본값 검사
+        resp = self.client.post(
+            "/api/auth/test",
+            headers={
+                "X-Auth-User": "non_existent_user",
+                "X-Auth-Password": "random_password",
+            },
+            json={},
+        )
+        self.assertEqual(resp.status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()

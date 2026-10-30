@@ -131,6 +131,7 @@ function setupEventListeners() {
       try {
         const res = await fetch(`${serverUrl}/api/jobs/clear`, {
           method: "POST",
+          credentials: "omit",
           headers: getAuthHeaders(),
           body: JSON.stringify({ filter: "completed" }),
         });
@@ -153,6 +154,7 @@ function setupEventListeners() {
       try {
         const res = await fetch(`${serverUrl}/api/jobs/clear`, {
           method: "POST",
+          credentials: "omit",
           headers: getAuthHeaders(),
           body: JSON.stringify({ filter: "failed" }),
         });
@@ -493,6 +495,7 @@ async function checkConnection() {
 
       const res = await fetch(`${testUrl}/api/auth/test`, {
         method: "POST",
+        credentials: "omit",
         headers: {
           "Content-Type": "application/json",
           "X-Auth-User": username,
@@ -571,6 +574,7 @@ async function runConnectionTest() {
     try {
       const res = await fetch(`${testUrl}/api/auth/test`, {
         method: "POST",
+        credentials: "omit",
         headers: {
           "Content-Type": "application/json",
           "X-Auth-User": username,
@@ -640,6 +644,7 @@ async function fetchJobs() {
   try {
     const res = await fetch(`${serverUrl}/api/jobs`, {
       method: "GET",
+      credentials: "omit",
       headers: getAuthHeaders(false),
     });
 
@@ -1060,6 +1065,7 @@ async function handleJobAction(jobId, action) {
 
     const res = await fetch(url, {
       method: method,
+      credentials: "omit",
       headers: getAuthHeaders(),
     });
 
@@ -1248,6 +1254,7 @@ async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "
 
   const res = await fetch(`${serverUrl}/api/jobs`, {
     method: "POST",
+    credentials: "omit",
     headers: getAuthHeaders(),
     body: JSON.stringify(payload),
   });
@@ -1755,6 +1762,7 @@ async function applyExtensionUpdate() {
 
     const res = await fetch(`${serverUrl}/api/extension/update`, {
       method: "POST",
+      credentials: "omit",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });

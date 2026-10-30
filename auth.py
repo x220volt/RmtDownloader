@@ -142,6 +142,7 @@ def login_required(f: Callable) -> Callable:
     """로그인 인증 확인 데코레이터.
 
     세션 쿠키, HTTP Basic Auth, 커스텀 X-Auth 헤더(X-Auth-User, X-Auth-Password)를 지원합니다.
+    명시적 자격 증명 헤더가 제공된 경우 세션 쿠키보다 우선 검증하며, 불일치 시 즉각 401을 반환합니다.
     """
 
     @wraps(f)
@@ -154,28 +155,57 @@ def login_required(f: Callable) -> Callable:
         if request.method == "OPTIONS":
             return f(*args, **kwargs)
 
-        # 1. 세션 쿠키 인증 확인
-        if session_authenticated(settings):
-            return f(*args, **kwargs)
-
-        # 2. HTTP Basic Auth 또는 커스텀 헤더 인증 (확장 프로그램 및 외부 API 연동용)
+        # 1. 명시적 헤더 자격 증명 확인 (확장 프로그램, 스크립트, API 클라이언트)
+        # 세션 쿠키보다 우선하여 전달된 자격 증명이 유효한지 검증합니다.
         auth = request.authorization
         header_user = request.headers.get("X-Auth-User")
         header_pw = request.headers.get("X-Auth-Password") or request.headers.get(
             "X-Auth-Pass"
         )
+        auth_header = request.headers.get("Authorization", "").strip()
+        bearer_token = None
+        if auth_header.startswith("Bearer "):
+            bearer_token = auth_header[7:].strip()
 
-        cand_user = auth.username if auth else header_user
-        cand_pw = auth.password if auth else header_pw
+        has_explicit_auth = bool(
+            auth or header_user or header_pw or bearer_token
+        )
 
-        if cand_user and cand_pw and validate_credentials(cand_user, cand_pw, settings):
+        if has_explicit_auth:
+            # Bearer API Token 인증
+            if bearer_token and is_token_authorized(bearer_token, settings):
+                return f(*args, **kwargs)
+
+            # Basic Auth 또는 X-Auth-User / X-Auth-Password 인증
+            cand_user = auth.username if auth else (header_user or "")
+            cand_pw = auth.password if auth else (header_pw or "")
+
+            if cand_user and cand_pw and validate_credentials(cand_user, cand_pw, settings):
+                return f(*args, **kwargs)
+
+            # 명시적으로 헤더를 전송했으나 인증에 실패한 경우 세션 쿠키와 무관하게 401 반환
+            return (
+                jsonify(
+                    {
+                        "error": "Unauthorized",
+                        "message": "아이디 또는 비밀번호가 올바르지 않습니다.",
+                    }
+                ),
+                401,
+            )
+
+        # 2. 명시적 헤더가 없는 경우에만 웹 브라우저 세션 쿠키 인증 확인
+        if session_authenticated(settings):
             return f(*args, **kwargs)
 
         # 3. 미인증 처리 (API 요청은 401 JSON, 일반 웹 브라우징은 /login 리다이렉트)
         if request.path.startswith("/api/"):
-            return jsonify(
-                {"error": "Unauthorized", "message": "로그인이 필요합니다."}
-            ), 401
+            return (
+                jsonify(
+                    {"error": "Unauthorized", "message": "로그인이 필요합니다."}
+                ),
+                401,
+            )
         return redirect(url_for("login"))
 
     return decorated_function
