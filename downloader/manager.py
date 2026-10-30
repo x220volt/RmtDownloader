@@ -770,6 +770,10 @@ class DownloadManager:
                         job.filename = resolved["filename"]
                     if resolved.get("options"):
                         job.options.update(resolved["options"])
+                    if resolved.get("method"):
+                        job.options["method"] = resolved["method"]
+                    if resolved.get("post_data"):
+                        job.options["post_data"] = resolved["post_data"]
                     job.status = "downloading"
                     self._broadcast("job_updated", job.to_dict())
 
@@ -929,6 +933,10 @@ class DownloadManager:
                             or job.options.get("referer"),
                             chunk_size=settings.get("chunk_size_kb", 256) * 1024,
                             progress_callback=on_progress,
+                            method=resolved.get("method")
+                            or job.options.get("method", "GET"),
+                            post_data=resolved.get("post_data")
+                            or job.options.get("post_data"),
                         )
                 with self._lock:
                     if self.jobs.get(job_id) is not job or job.status != "downloading":

@@ -204,6 +204,8 @@ class DownloadTask:
         progress_callback=None,
         status_callback=None,
         partial_id: str = "",
+        method: str = "GET",
+        post_data: dict | None = None,
     ):
         self.partial_id = re.sub(r"[^a-zA-Z0-9_-]", "", partial_id)
         self.url = url
@@ -215,6 +217,8 @@ class DownloadTask:
         self.chunk_size = chunk_size
         self.progress_callback = progress_callback
         self.status_callback = status_callback
+        self.method = (method or "GET").upper()
+        self.post_data = post_data
 
         self._is_stopped = False
         self._is_paused = False
@@ -252,7 +256,25 @@ class DownloadTask:
         session = requests.Session()
         session.headers.update(req_headers)
 
-        if not self.filename:
+        def _request_stream(req_h: dict):
+            if self.method == "POST":
+                return session.post(
+                    self.url,
+                    data=self.post_data,
+                    headers=req_h,
+                    stream=True,
+                    timeout=REQUEST_TIMEOUT,
+                    allow_redirects=True,
+                )
+            return session.get(
+                self.url,
+                headers=req_h,
+                stream=True,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True,
+            )
+
+        if not self.filename and self.method == "GET":
             try:
                 head_resp = session.head(
                     self.url,
@@ -299,13 +321,7 @@ class DownloadTask:
 
         resp = None
         try:
-            resp = session.get(
-                self.url,
-                headers=req_headers,
-                stream=True,
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=True,
-            )
+            resp = _request_stream(req_headers)
 
             # 서버가 416 Range Not Satisfiable 반환 시 처음부터 재시도
             if resp.status_code == 416 and existing_size > 0:
@@ -313,13 +329,7 @@ class DownloadTask:
                 resp.close()
                 req_headers.pop("Range", None)
                 existing_size = 0
-                resp = session.get(
-                    self.url,
-                    headers=req_headers,
-                    stream=True,
-                    timeout=REQUEST_TIMEOUT,
-                    allow_redirects=True,
-                )
+                resp = _request_stream(req_headers)
 
             resp.raise_for_status()
 
@@ -370,13 +380,7 @@ class DownloadTask:
                     resp.close()
                     req_headers.pop("Range", None)
                     existing_size = 0
-                    resp = session.get(
-                        self.url,
-                        headers=req_headers,
-                        stream=True,
-                        timeout=REQUEST_TIMEOUT,
-                        allow_redirects=True,
-                    )
+                    resp = _request_stream(req_headers)
                     resp.raise_for_status()
                     if resp.status_code == 206:
                         retry_range = _parse_content_range(

@@ -24,6 +24,7 @@
    - **MegaUp (`megaup.net`)**: Cloudflare 우회 및 다운로드 토큰 URL 해석.
    - **X-Share (`x-share.net/s/...`, `x-share.net/b/...`)**: 단일 파일 및 묶음(Bundle) API 토큰 발급·일괄 다운로드.
    - **Romsfun (`romsfun.com`)**: 레트로 게임 ROM 다운로드 페이지 자동 직링크 발급 및 멀티 파트 다운로드 지원.
+   - **WoWroms (`wowroms.com`)**: 레트로 게임 ROM, ISO, 에뮬레이터 다운로드 페이지 자동 직링크 발급 및 스트리밍 다운로드 지원.
    - **Rootz (`rootz.so/d/...`)**: 프록시 다운로드 API 및 고속 CDN 직링크 자동 추출, 이어받기 지원.
    - **네이버 MYBOX (`mybox.naver.com/share/...`)**: 공유 링크 및 파일 속성 API를 통한 고속 직링크 발급 및 이어받기 지원.
    - **네이버 카페 & 티스토리 (`cafe.naver.com`, `*.tistory.com`, `kakaocdn`, `daumcdn`)**: 게시글 본문 내 모든 첨부파일 일괄 추출 및 게시글 제목별 하위 폴더 자동 분류.
