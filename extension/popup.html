@@ -30,6 +30,22 @@
       </div>
     </header>
 
+    <!-- 깃허브 최신 릴리즈 업데이트 알림 배너 (새 버전 감지 시 노출) -->
+    <div class="update-banner hidden" id="updateBanner">
+      <div class="update-banner-left">
+        <span class="update-badge">NEW</span>
+        <div class="update-text-box">
+          <span class="update-title" id="updateVersionText">새 버전 출시</span>
+          <a href="#" class="update-notes-link" id="updateNotesLink" target="_blank" rel="noopener">변경 내역 ↗</a>
+        </div>
+      </div>
+      <div class="update-banner-right">
+        <button type="button" class="btn-update-action" id="applyUpdateBtn" title="서버를 통해 최신 코드를 안전하게 갱신하고 확장 프로그램을 다시 로드합니다">
+          ⚡ 원클릭 업데이트
+        </button>
+      </div>
+    </div>
+
     <!-- 실시간 요약 바 (다운로드 총 속도 & 새로고침) -->
     <div class="stats-bar" id="statsBar">
       <div class="speed-indicator" id="speedIndicator" title="전체 다운로드 실시간 속도">

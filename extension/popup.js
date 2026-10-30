@@ -58,6 +58,12 @@ const testResult = document.getElementById("testResult");
 const openWebDashboardLink = document.getElementById("openWebDashboardLink");
 const popupToast = document.getElementById("popupToast");
 
+// 깃허브 최신 릴리즈 업데이트 요소
+const updateBanner = document.getElementById("updateBanner");
+const updateVersionText = document.getElementById("updateVersionText");
+const updateNotesLink = document.getElementById("updateNotesLink");
+const applyUpdateBtn = document.getElementById("applyUpdateBtn");
+
 const popupPagination = document.getElementById("popupPagination");
 const popupPrevBtn = document.getElementById("popupPrevBtn");
 const popupNextBtn = document.getElementById("popupNextBtn");
@@ -72,10 +78,15 @@ let baseDownloadDir = "";
 let pollTimer = null;
 let isFetching = false;
 let toastTimer = null;
+let latestReleaseData = null;
+const UPDATE_CHECK_CACHE_MS = 20 * 60 * 1000; // 20분 캐시
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   setupEventListeners();
+
+  // 최신 릴리즈 확인 (백그라운드에서 비동기 체크)
+  checkForExtensionUpdate();
 
   const isConnected = await checkConnection();
   if (isConnected) {
@@ -341,6 +352,11 @@ function setupEventListeners() {
       const url = normalizeServerUrl(serverUrlInput.value) || "http://127.0.0.1:7971";
       chrome.tabs.create({ url: url });
     });
+  }
+
+  // 깃허브 최신 릴리즈 원클릭 업데이트 버튼
+  if (applyUpdateBtn) {
+    applyUpdateBtn.addEventListener("click", applyExtensionUpdate);
   }
 }
 
@@ -1633,5 +1649,138 @@ async function sendSelectedScannedLinks() {
     await fetchJobs();
   } else {
     showPopupToast("전송에 실패했습니다. 서버 연결 상태를 확인해 주세요.", true);
+  }
+}
+
+/**
+ * 버전 문자열 비교 (SemVer 지원, v접두어 무시)
+ * @param {string} currentVer 예: "0.1.34"
+ * @param {string} latestVer 예: "v0.1.35" 또는 "0.1.35"
+ * @returns {boolean} 최신 버전이 현재 버전보다 높으면 true
+ */
+function isNewerVersion(currentVer, latestVer) {
+  if (!latestVer) return false;
+  const cleanCurrent = (currentVer || "").replace(/^v/i, "").trim();
+  const cleanLatest = (latestVer || "").replace(/^v/i, "").trim();
+  if (!cleanLatest) return false;
+  if (cleanCurrent === cleanLatest) return false;
+
+  const currentParts = cleanCurrent.split(".").map((p) => parseInt(p, 10) || 0);
+  const latestParts = cleanLatest.split(".").map((p) => parseInt(p, 10) || 0);
+  const maxLen = Math.max(currentParts.length, latestParts.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const c = currentParts[i] || 0;
+    const l = latestParts[i] || 0;
+    if (l > c) return true;
+    if (l < c) return false;
+  }
+  return false;
+}
+
+/**
+ * GitHub 릴리즈 최신 버전 확인 및 배너 표시
+ */
+async function checkForExtensionUpdate(force = false) {
+  try {
+    const manifest = chrome.runtime.getManifest();
+    const currentVersion = manifest.version || "0.0.0";
+
+    const storage = await chrome.storage.local.get(["lastUpdateCheckTime", "cachedReleaseInfo"]);
+    const now = Date.now();
+
+    let release = null;
+    if (!force && storage.lastUpdateCheckTime && (now - storage.lastUpdateCheckTime < UPDATE_CHECK_CACHE_MS) && storage.cachedReleaseInfo) {
+      release = storage.cachedReleaseInfo;
+    } else {
+      const resp = await fetch("https://api.github.com/repos/x220volt/RmtDownloader/releases/latest", {
+        headers: { "Accept": "application/vnd.github.v3+json" }
+      });
+      if (resp.ok) {
+        release = await resp.json();
+        await chrome.storage.local.set({
+          lastUpdateCheckTime: now,
+          cachedReleaseInfo: release
+        });
+      }
+    }
+
+    if (release && release.tag_name) {
+      if (isNewerVersion(currentVersion, release.tag_name)) {
+        latestReleaseData = release;
+        const verStr = release.tag_name.replace(/^v/i, "");
+        if (updateVersionText) {
+          updateVersionText.textContent = `v${verStr} 출시 (현재: v${currentVersion})`;
+        }
+        if (updateNotesLink) {
+          updateNotesLink.href = release.html_url || "https://github.com/x220volt/RmtDownloader/releases";
+        }
+        if (updateBanner) {
+          updateBanner.classList.remove("hidden");
+        }
+        return;
+      }
+    }
+
+    // 최신 버전이 아니거나 확인 불가 시 배너 숨김
+    if (updateBanner) {
+      updateBanner.classList.add("hidden");
+    }
+  } catch (err) {
+    console.debug("확장 업데이트 확인 중 경미한 오류 (무시 가능):", err);
+  }
+}
+
+/**
+ * 로컬 파이썬 서버(/api/extension/update)를 통한 원클릭 업데이트 실행
+ */
+async function applyExtensionUpdate() {
+  const serverUrl = normalizeServerUrl(serverUrlInput.value);
+  if (!serverUrl) {
+    showPopupToast("서버 주소가 설정되지 않았습니다.", true);
+    return;
+  }
+
+  if (!applyUpdateBtn) return;
+  const originalHtml = applyUpdateBtn.innerHTML;
+  applyUpdateBtn.disabled = true;
+  applyUpdateBtn.innerHTML = "<span>⏳ 업데이트 중...</span>";
+
+  try {
+    showPopupToast("최신 확장 프로그램 버전을 다운로드 및 갱신 중입니다...");
+    const payload = {};
+    if (latestReleaseData && latestReleaseData.tag_name) {
+      payload.tag_name = latestReleaseData.tag_name;
+    }
+
+    const res = await fetch(`${serverUrl}/api/extension/update`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status === "ok") {
+      showPopupToast("✅ 확장이 최신 버전으로 업데이트되었습니다! 확장 프로그램을 재로드합니다...");
+      // 캐시 삭제
+      await chrome.storage.local.remove(["lastUpdateCheckTime", "cachedReleaseInfo"]);
+      setTimeout(() => {
+        try {
+          chrome.runtime.reload();
+        } catch (e) {
+          window.location.reload();
+        }
+      }, 1200);
+    } else {
+      const errMsg = data.detail || (res.status === 401 ? "로그인이 필요합니다." : "업데이트 실패");
+      showPopupToast(errMsg, true);
+      applyUpdateBtn.disabled = false;
+      applyUpdateBtn.innerHTML = originalHtml;
+    }
+  } catch (err) {
+    console.error("원클릭 업데이트 요청 오류:", err);
+    showPopupToast(`업데이트 요청 실패: ${err.message || "서버 통신 오류"}`, true);
+    applyUpdateBtn.disabled = false;
+    applyUpdateBtn.innerHTML = originalHtml;
   }
 }

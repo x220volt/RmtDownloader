@@ -1499,3 +1499,93 @@ body {
   flex-shrink: 0;
   width: auto;
 }
+
+/* 깃허브 최신 릴리즈 업데이트 알림 배너 */
+.update-banner {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  animation: bannerFade 0.25s ease-out;
+}
+
+@keyframes bannerFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.update-banner.hidden {
+  display: none !important;
+}
+
+.update-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.update-badge {
+  background: #ec4899;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.update-text-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.update-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f3e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-notes-link {
+  font-size: 10px;
+  color: #c084fc;
+  text-decoration: none;
+}
+
+.update-notes-link:hover {
+  text-decoration: underline;
+}
+
+.btn-update-action {
+  background: linear-gradient(135deg, #8b5cf6, #d946ef);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);
+}
+
+.btn-update-action:hover:not(:disabled) {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+
+.btn-update-action:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}

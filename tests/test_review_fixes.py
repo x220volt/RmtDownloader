@@ -212,5 +212,56 @@ class ServiceCookieTests(unittest.TestCase):
             self.assertTrue(TeraBoxResolver().can_handle("https://" + host + "/s/abc"))
 
 
+class ExtensionUpdateSecurityTests(unittest.TestCase):
+    def test_update_requires_authentication(self):
+        from app import app
+        client = app.test_client()
+        resp = client.post("/api/extension/update", json={})
+        self.assertIn(resp.status_code, (401, 302))
+
+    def test_zip_slip_and_whitelist_security(self):
+        import io
+        import os
+        from pathlib import Path
+        import zipfile
+        import tempfile
+        from app import _safe_extract_extension_zip
+
+        # 1. Zip Slip 시도 zip 생성
+        malicious_buf = io.BytesIO()
+        with zipfile.ZipFile(malicious_buf, "w") as zf:
+            zf.writestr("../evil.bat", "calc.exe")
+        malicious_buf.seek(0)
+
+        with tempfile.TemporaryDirectory() as target_dir:
+            with self.assertRaises(ValueError) as ctx:
+                _safe_extract_extension_zip(malicious_buf.getvalue(), Path(target_dir))
+            self.assertIn("허용되지 않는", str(ctx.exception))
+
+        # 2. 실행 파일(.exe) 차단
+        exe_buf = io.BytesIO()
+        with zipfile.ZipFile(exe_buf, "w") as zf:
+            zf.writestr("malware.exe", "fake binary")
+        exe_buf.seek(0)
+
+        with tempfile.TemporaryDirectory() as target_dir:
+            with self.assertRaises(ValueError) as ctx:
+                _safe_extract_extension_zip(exe_buf.getvalue(), Path(target_dir))
+            self.assertIn("허용되지 않는 파일 확장자", str(ctx.exception))
+
+        # 3. 안전한 확장 파일은 정상 추출
+        safe_buf = io.BytesIO()
+        with zipfile.ZipFile(safe_buf, "w") as zf:
+            zf.writestr("manifest.json", '{"name": "test", "version": "1.0.0"}')
+            zf.writestr("popup.js", 'console.log("hello");')
+        safe_buf.seek(0)
+
+        with tempfile.TemporaryDirectory() as target_dir:
+            extracted_count = _safe_extract_extension_zip(safe_buf.getvalue(), Path(target_dir))
+            self.assertEqual(extracted_count, 2)
+            self.assertTrue(os.path.exists(os.path.join(target_dir, "manifest.json")))
+            self.assertTrue(os.path.exists(os.path.join(target_dir, "popup.js")))
+
+
 if __name__ == "__main__":
     unittest.main()

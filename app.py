@@ -11,6 +11,7 @@ import sys
 import time
 import zipfile
 from datetime import timedelta
+from pathlib import Path
 
 from markupsafe import escape
 
@@ -734,6 +735,176 @@ def get_addons():
         {
             "success": True,
             "addons": addon_registry.get_ui_manifest(),
+        }
+    )
+
+
+GITHUB_REPO_OWNER = "x220volt"
+GITHUB_REPO_NAME = "RmtDownloader"
+EXTENSION_ALLOWED_EXTENSIONS = {
+    ".js",
+    ".html",
+    ".css",
+    ".json",
+    ".png",
+    ".svg",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+}
+
+
+def _get_extension_dir() -> Path:
+    """크롬 확장 프로그램 디렉터리 경로를 확인합니다."""
+    exe_dir = Path(sys.executable).resolve().parent
+    if (exe_dir / "extension").is_dir():
+        return (exe_dir / "extension").resolve()
+    src_dir = Path(__file__).resolve().parent
+    if (src_dir / "extension").is_dir():
+        return (src_dir / "extension").resolve()
+    return (src_dir / "extension").resolve()
+
+
+def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
+    """확장 프로그램 zip 데이터를 보안 검증 후 안전하게 대상 폴더에 덮어씁니다."""
+    import io
+    import zipfile
+
+    target_dir = Path(target_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        infolist = zf.infolist()
+        if not infolist:
+            raise ValueError("압축 파일이 비어 있습니다.")
+
+        for info in infolist:
+            if info.is_dir() or info.filename.endswith("/"):
+                continue
+
+            ext = Path(info.filename).suffix.lower()
+            if ext not in EXTENSION_ALLOWED_EXTENSIONS:
+                raise ValueError(
+                    f"보안 위협 감지: 허용되지 않는 파일 확장자({ext})가 포함되어 있습니다."
+                )
+
+            dest_path = (target_dir / info.filename).resolve()
+            if not str(dest_path).startswith(str(target_dir)):
+                raise ValueError(
+                    "보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다."
+                )
+
+        zf.extractall(target_dir)
+        return len([i for i in infolist if not i.is_dir() and not i.filename.endswith("/")])
+
+
+@app.route("/api/extension/update", methods=["POST"])
+@login_required
+def update_extension():
+    """GitHub 공식 릴리즈에서 크롬 확장 프로그램 패키지를 안전하게 다운로드하여 로컬 폴더를 갱신합니다."""
+    from urllib.parse import urlparse
+
+    import requests
+
+    data = request.get_json(silent=True) or {}
+    tag_name = (data.get("tag") or data.get("tag_name") or "").strip()
+
+    # 1. 깃허브 API에서 릴리즈 정보 조회
+    release_api = (
+        f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/tags/{tag_name}"
+        if tag_name
+        else f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+    )
+
+    headers = {"User-Agent": "RemoteDownloader-Updater"}
+    try:
+        resp = requests.get(release_api, headers=headers, timeout=12)
+    except Exception as e:
+        return jsonify({"status": "error", "success": False, "error": f"GitHub API 접속 실패: {e}"}), 502
+
+    if resp.status_code != 200:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "success": False,
+                    "error": f"GitHub 릴리즈 정보를 가져오지 못했습니다. ({resp.status_code})",
+                }
+            ),
+            400,
+        )
+
+    rel_info = resp.json()
+    resolved_tag = rel_info.get("tag_name", "latest")
+    assets = rel_info.get("assets", [])
+
+    # 2. RemoteDownloader-Extension.zip 애셋 찾기
+    zip_asset = next(
+        (a for a in assets if a.get("name") == "RemoteDownloader-Extension.zip"), None
+    )
+    if not zip_asset or not zip_asset.get("browser_download_url"):
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "success": False,
+                    "error": "릴리즈에 확장 프로그램(RemoteDownloader-Extension.zip) 애셋이 없습니다.",
+                }
+            ),
+            404,
+        )
+
+    download_url = zip_asset["browser_download_url"]
+
+    # 3. [보안 안전장치 1] URL 도메인 및 HTTPS 검증
+    parsed_url = urlparse(download_url)
+    if not (
+        parsed_url.scheme == "https"
+        and (
+            parsed_url.hostname == "github.com"
+            or (parsed_url.hostname and parsed_url.hostname.endswith(".github.com"))
+        )
+    ):
+        return jsonify({"status": "error", "success": False, "error": "신뢰할 수 없는 다운로드 출처입니다."}), 400
+
+    # 4. 바이너리 다운로드 (메모리 버퍼)
+    try:
+        zip_resp = requests.get(download_url, headers=headers, timeout=30)
+    except Exception as e:
+        return jsonify({"status": "error", "success": False, "error": f"다운로드 네트워크 오류: {e}"}), 502
+
+    if zip_resp.status_code != 200:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "success": False,
+                    "error": f"확장 프로그램 zip 다운로드 실패 ({zip_resp.status_code})",
+                }
+            ),
+            502,
+        )
+
+    # 5. [보안 안전장치 2 & 3] Zip Slip 방어 및 파일 확장자 화이트리스트 검사 후 압축 해제
+    target_dir = _get_extension_dir()
+    try:
+        count = _safe_extract_extension_zip(zip_resp.content, target_dir)
+    except ValueError as ve:
+        return jsonify({"status": "error", "success": False, "error": str(ve)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "success": False, "error": f"확장 프로그램 갱신 중 오류: {e}"}), 500
+
+    logger.info(
+        f"크롬 확장 프로그램이 GitHub 릴리즈({resolved_tag})로 성공적으로 업데이트되었습니다. ({count}개 파일 갱신, 경로: {target_dir})"
+    )
+    return jsonify(
+        {
+            "status": "ok",
+            "success": True,
+            "message": f"확장 프로그램이 {resolved_tag} 버전으로 안전하게 업데이트되었습니다.",
+            "version": resolved_tag,
+            "updated_files": count,
         }
     )
 
