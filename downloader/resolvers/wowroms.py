@@ -187,3 +187,4 @@ class WowromsResolver(BaseResolver):
             "referer": current_page_url,
             "source_service": "WoWroms",
         }
+
