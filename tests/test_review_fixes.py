@@ -291,13 +291,13 @@ class AppUpdateSecurityTests(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "tag_name": "v0.1.35",
+            "tag_name": "v9.9.9",
             "body": "테스트 릴리즈 노트",
-            "html_url": "https://github.com/x220volt/RmtDownloader/releases/tag/v0.1.35",
+            "html_url": "https://github.com/x220volt/RmtDownloader/releases/tag/v9.9.9",
             "assets": [
                 {
                     "name": "RemoteDownloader.exe",
-                    "browser_download_url": "https://github.com/x220volt/RmtDownloader/releases/download/v0.1.35/RemoteDownloader.exe",
+                    "browser_download_url": "https://github.com/x220volt/RmtDownloader/releases/download/v9.9.9/RemoteDownloader.exe",
                 }
             ],
         }
@@ -307,7 +307,7 @@ class AppUpdateSecurityTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
             self.assertEqual(data["status"], "ok")
-            self.assertEqual(data["latest_version"], "v0.1.35")
+            self.assertEqual(data["latest_version"], "v9.9.9")
             self.assertTrue(data["has_update"])
             self.assertTrue(data["has_exe_asset"])
 
