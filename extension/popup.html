@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Remote Downloader Companion</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- 헤더 -->
+    <header class="popup-header">
+      <div class="brand">
+        <img src="icons/icon48.png" alt="Logo" class="logo-img">
+        <div class="brand-text">
+          <h1 class="brand-title">원격 다운로더</h1>
+          <span class="brand-sub">Chrome Companion v0.1.34</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="status-badge" id="statusBadge" title="서버 연결 상태">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">확인 중...</span>
+        </div>
+        <button type="button" class="btn-icon" id="settingsBtn" title="서버 및 계정 설정">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 실시간 요약 바 (다운로드 총 속도 & 새로고침) -->
+    <div class="stats-bar" id="statsBar">
+      <div class="speed-indicator" id="speedIndicator" title="전체 다운로드 실시간 속도">
+        <svg class="speed-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <span id="totalSpeedText">0 B/s</span>
+      </div>
+      <div class="stats-actions">
+        <button type="button" class="btn-icon" id="refreshBtn" title="목록 새로고침">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 1. 빠른 현재 탭 전송 & 현재 페이지 스캔 버튼 -->
+    <div class="quick-action-grid">
+      <button type="button" class="btn-primary" id="sendCurrentTabBtn" title="현재 열려있는 웹페이지의 URL을 서버로 보냅니다">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <line x1="22" y1="2" x2="11" y2="13"></line>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        </svg>
+        <span>현재 탭 전송</span>
+      </button>
+      <button type="button" class="btn-secondary btn-scanner" id="scanPageBtn" title="현재 페이지의 모든 다운로드 링크와 Base64, 추출코드를 자동 검색합니다">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+        <span>페이지 링크 스캔</span>
+      </button>
+    </div>
+
+    <!-- 1-1. 페이지 링크 스캔 결과 패널 (스캔 시 자동 노출) -->
+    <div class="section scan-section hidden" id="scanSection">
+      <div class="scan-header">
+        <div class="scan-title">
+          <span class="scan-badge" id="scanCountBadge">0개 발견</span>
+          <span class="scan-desc">다운로드할 항목 선택</span>
+        </div>
+        <div class="scan-header-actions">
+          <label class="select-all-label" title="전체 선택 / 해제">
+            <input type="checkbox" id="scanSelectAll" checked>
+            <span>전체</span>
+          </label>
+          <button type="button" class="btn-close-scan" id="closeScanBtn" title="스캔 창 닫기">&times;</button>
+        </div>
+      </div>
+      <div class="scan-list-container" id="scanListContainer">
+        <!-- 스캔된 링크 항목들이 여기에 렌더링됩니다 -->
+      </div>
+      <div class="scan-footer">
+        <input type="text" id="scanSubfolderInput" class="form-input flex-1" placeholder="하위 폴더명 (선택)">
+        <button type="button" class="btn-primary btn-send-scanned" id="sendScannedBtn">
+          <span>선택한 <strong id="selectedScanCount">0</strong>개 전송</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. 링크 직접 추가 섹션 (탭 URL 보내기 바로 아래 위치) -->
+    <div class="section direct-add-section">
+      <div class="section-toggle" id="toggleDirectAdd">
+        <span class="section-label">➕ 링크 직접 추가 / 드래그</span>
+        <span class="arrow" id="directAddArrow">▲</span>
+      </div>
+      <div class="toggle-content show" id="directAddContent">
+        <textarea id="manualUrlInput" class="input-textarea" rows="3" placeholder="전송할 링크, 마그넷 또는 Base64 주소를 붙여넣으세요 (여러 줄 가능)&#10;웹페이지의 링크나 텍스트를 여기로 드래그해도 됩니다..."></textarea>
+        <div class="form-row">
+          <input type="text" id="manualSubfolderInput" class="form-input flex-1" placeholder="하위 폴더 (선택)">
+          <input type="text" id="manualPasswordInput" class="form-input flex-1 input-password-hint" placeholder="암호/추출코드 (선택)">
+        </div>
+        <div class="form-row">
+          <button type="button" class="btn-secondary btn-send-manual" id="sendManualBtn">
+            링크 전송
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 대기열 (다운로드 작업 목록 섹션) -->
+    <div class="section jobs-section">
+      <!-- 4분할 고정 탭 바 -->
+      <div class="tabs-header">
+        <button type="button" class="tab-btn active" data-tab="active" id="tabActive">
+          <span>진행/대기</span>
+          <span class="tab-badge" id="tabCountActive">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="completed" id="tabCompleted">
+          <span>완료</span>
+          <span class="tab-badge" id="tabCountCompleted">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="failed" id="tabFailed">
+          <span>실패</span>
+          <span class="tab-badge" id="tabCountFailed">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-tab="all" id="tabAll">
+          <span>전체</span>
+          <span class="tab-badge" id="tabCountAll">0</span>
+        </button>
+      </div>
+
+      <!-- 일괄 비우기 액션 행 (항목이 있을 때만 자동 표시) -->
+      <div class="tab-actions" id="tabActionsBar">
+        <button type="button" class="btn-clear-tab" id="btnClearCompleted" title="완료 목록 비우기">
+          ✓ 완료 비우기
+        </button>
+        <button type="button" class="btn-clear-tab danger" id="btnClearFailed" title="실패/취소 목록 비우기">
+          ✕ 실패 비우기
+        </button>
+      </div>
+
+      <!-- 작업 목록 스크롤 컨테이너 -->
+      <div class="jobs-list" id="jobsList">
+        <div class="jobs-empty" id="jobsEmpty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <p id="emptyMsg">다운로드 작업이 없습니다.</p>
+        </div>
+      </div>
+
+      <!-- 팝업 페이징 네비게이션 -->
+      <div class="popup-pagination" id="popupPagination">
+        <button type="button" class="btn-popup-page" id="popupPrevBtn" title="이전 페이지">&laquo; 이전</button>
+        <span class="popup-page-text" id="popupPageText">1 / 1 (0개)</span>
+        <button type="button" class="btn-popup-page" id="popupNextBtn" title="다음 페이지">다음 &raquo;</button>
+      </div>
+    </div>
+
+    <!-- 하단 대시보드 바로가기 -->
+    <footer class="popup-footer">
+      <a href="#" class="open-web-link" id="openWebDashboardLink">
+        웹 대시보드 전체화면 열기 ↗
+      </a>
+    </footer>
+
+    <!-- 서버 & 계정 설정 모달 (우측 상단 ⚙️ 버튼으로 오픈) -->
+    <div class="modal-backdrop" id="settingsModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h2 class="modal-title">⚙️ 서버 및 계정 설정</h2>
+          <button type="button" class="modal-close-btn" id="closeSettingsModal" title="닫기">&times;</button>
+        </div>
+        <div class="modal-body" id="settingsContent">
+          <div class="form-group">
+            <label class="form-label" for="serverUrlInput">서버 주소</label>
+            <input type="text" id="serverUrlInput" class="form-input" placeholder="http://192.168.0.x:7971">
+            <span class="help-text">PC의 IP 주소와 포트 (예: http://127.0.0.1:7971)</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label" for="usernameInput">아이디</label>
+              <input type="text" id="usernameInput" class="form-input" placeholder="admin">
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="passwordInput">비밀번호</label>
+              <input type="password" id="passwordInput" class="form-input" placeholder="비밀번호">
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button type="button" class="btn-sm btn-outline" id="testConnBtn">연결 테스트</button>
+            <button type="button" class="btn-sm btn-primary-sm" id="saveSettingsBtn">설정 저장</button>
+          </div>
+          <div class="test-result" id="testResult"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 팝업 내부 토스트 알림 -->
+  <div class="popup-toast" id="popupToast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

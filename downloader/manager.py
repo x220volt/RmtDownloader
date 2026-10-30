@@ -1,0 +1,1050 @@
+import glob
+import json
+import logging
+import os
+import queue
+import tempfile
+import threading
+import time
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from config import CONFIG_DIR
+
+from .engine import (
+    DownloadTask,
+    format_bytes,
+    format_eta,
+    format_speed,
+    sanitize_folder_name,
+)
+from .resolvers.dispatcher import default_dispatcher
+from .url_helper import canonical_url_key, clean_url
+
+logger = logging.getLogger(__name__)
+
+HISTORY_FILE = CONFIG_DIR / "download_history.json"
+MAX_HISTORY_ENTRIES = 5000
+
+
+class DownloadJob:
+    """단일 다운로드 작업 객체."""
+
+    def __init__(self, url: str, download_dir: str, options: dict | None = None):
+        self.id = str(uuid.uuid4())
+        self.original_url = clean_url(url)
+        self.download_dir = download_dir
+        self.options = options or {}
+
+        # 상태: queued, resolving, downloading, paused, completed, failed, cancelled
+        self.status = "queued"
+        self.service_name = "Auto"
+        self.resolved_url = ""
+        self.filename = ""
+        self.file_path = ""
+        self.error_message = ""
+
+        # 진행 지표
+        self.downloaded_bytes = 0
+        self.total_bytes: Optional[int] = None
+        self.progress = 0.0  # 0.0 ~ 100.0 %
+        self.speed_bps = 0.0
+        self.speed_str = "0 KB/s"
+        self.eta_seconds: Optional[int | float] = None
+        self.eta_str = "--:--"
+
+        # 자동/수동 다운로드 구분 (is_auto: True -> 자동, False -> 수동)
+        self.is_auto: bool = bool(self.options.get("is_auto", False))
+        self.download_type: str = "auto" if self.is_auto else "manual"
+
+        # 시간
+        self.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.completed_at: Optional[str] = None
+
+        # 출처 게시글 정보 (코네 등 자동 수집 시 글 제목/URL)
+        self.referer: str = str(self.options.get("referer") or "").strip()
+        self.source_title: str = str(
+            self.options.get("source_title") or self.options.get("post_title") or ""
+        ).strip()
+        self.source_url: str = str(
+            self.options.get("source_url")
+            or self.options.get("post_url")
+            or self.referer
+            or ""
+        ).strip()
+
+        # 내부 제어 객체
+        self.task: Optional[Any] = None
+        self.thread: Optional[threading.Thread] = None
+
+    def to_dict(self) -> dict:
+        """클라이언트 전달용 직렬화 딕셔너리 반환."""
+        return {
+            "id": self.id,
+            "original_url": self.original_url,
+            "status": self.status,
+            "service_name": self.service_name,
+            "filename": self.filename
+            or self.original_url.split("?")[0].split("/")[-1]
+            or "파일",
+            "file_path": self.file_path,
+            "download_dir": self.download_dir,
+            "error_message": self.error_message,
+            "source_title": self.source_title,
+            "source_url": self.source_url,
+            "referer": self.referer,
+            "subfolder": self.options.get("subfolder", ""),
+            "downloaded_bytes": self.downloaded_bytes,
+            "total_bytes": self.total_bytes,
+            "downloaded_str": format_bytes(self.downloaded_bytes),
+            "total_str": format_bytes(self.total_bytes),
+            "progress": round(self.progress, 1),
+            "speed_bps": self.speed_bps,
+            "speed_str": self.speed_str,
+            "eta_seconds": self.eta_seconds,
+            "eta_str": self.eta_str,
+            "created_at": self.created_at,
+            "completed_at": self.completed_at,
+            "is_auto": self.is_auto,
+            "download_type": self.download_type,
+        }
+
+
+class DownloadManager:
+    """다운로드 큐 및 작업 생명주기를 총괄하는 매니저."""
+
+    def __init__(self, settings_getter):
+        self.settings_getter = settings_getter
+        self.jobs: Dict[str, DownloadJob] = {}
+        self.queue = queue.Queue()
+        self._lock = threading.RLock()
+        self._listeners: List[queue.Queue] = []
+        self._worker_threads = []
+        self._stop_event = threading.Event()
+        self._completed_history: Dict[str, dict] = {}
+
+        # 완료 히스토리 로드
+        self._load_history()
+
+        # 워커 스레드 초기화
+        self._start_workers()
+
+    def _load_history(self):
+        """이전에 다운로드 완료된 URL 히스토리를 로드합니다."""
+        with self._lock:
+            if HISTORY_FILE.exists():
+                try:
+                    with open(HISTORY_FILE, encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        for v in data.values():
+                            if isinstance(v, dict):
+                                if "is_auto" not in v:
+                                    v["is_auto"] = False
+                                if "download_type" not in v:
+                                    v["download_type"] = (
+                                        "auto" if v["is_auto"] else "manual"
+                                    )
+                        self._completed_history = data
+                        logger.info(
+                            "완료된 다운로드 히스토리 %d건 로드 완료",
+                            len(self._completed_history),
+                        )
+                except Exception as e:
+                    logger.warning("다운로드 히스토리 로드 실패: %s", e)
+                    self._completed_history = {}
+
+    def _save_history(self):
+        """다운로드 히스토리를 원자적으로 파일에 저장합니다."""
+        with self._lock:
+            temp_path = None
+            try:
+                # 최대 엔트리 수 제한
+                if len(self._completed_history) > MAX_HISTORY_ENTRIES:
+                    keys_to_keep = list(self._completed_history.keys())[
+                        -MAX_HISTORY_ENTRIES:
+                    ]
+                    self._completed_history = {
+                        k: self._completed_history[k] for k in keys_to_keep
+                    }
+
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=HISTORY_FILE.parent,
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
+                    temp_path = stream.name
+                    json.dump(
+                        self._completed_history, stream, indent=2, ensure_ascii=False
+                    )
+                os.replace(temp_path, HISTORY_FILE)
+            except Exception as e:
+                logger.warning("다운로드 히스토리 저장 실패: %s", e)
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+
+    def _record_completed_history(self, job: DownloadJob):
+        """완료된 작업을 히스토리에 기록합니다."""
+        canonical_key = canonical_url_key(job.original_url)
+        if not canonical_key:
+            return
+        with self._lock:
+            self._completed_history[canonical_key] = {
+                "url": job.original_url,
+                "canonical_key": canonical_key,
+                "filename": job.filename,
+                "file_path": job.file_path,
+                "source_title": job.source_title,
+                "source_url": job.source_url,
+                "size": job.total_bytes or job.downloaded_bytes,
+                "completed_at": job.completed_at
+                or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "is_auto": job.is_auto,
+                "download_type": job.download_type,
+            }
+            self._save_history()
+
+    def is_duplicate_url(self, url: str) -> tuple[bool, str, dict | None]:
+        """
+        주어진 URL이 이미 대기열/다운로드 중이거나 완료된 내역이 있는지 검사합니다.
+        반환값: (is_duplicate: bool, reason: str, info: dict | None)
+        """
+        canonical_key = canonical_url_key(url)
+        if not canonical_key:
+            return False, "", None
+
+        with self._lock:
+            # 1. 현재 메모리 상의 작업 큐 검사
+            for job in self.jobs.values():
+                if canonical_url_key(job.original_url) == canonical_key:
+                    if job.status in ("queued", "resolving", "downloading", "paused"):
+                        return (
+                            True,
+                            "이미 다운로드 대기 또는 진행 중인 링크입니다.",
+                            job.to_dict(),
+                        )
+                    elif job.status == "completed":
+                        return True, "이미 다운로드가 완료된 링크입니다.", job.to_dict()
+
+            # 2. 영구 보관된 완료 다운로드 히스토리 검사
+            if canonical_key in self._completed_history:
+                hist_info = self._completed_history[canonical_key]
+                return True, "이전에 이미 다운로드가 완료된 링크입니다.", hist_info
+
+        return False, "", None
+
+    def clear_history(self) -> int:
+        """다운로드 완료 히스토리를 비웁니다."""
+        with self._lock:
+            count = len(self._completed_history)
+            self._completed_history.clear()
+            if HISTORY_FILE.exists():
+                try:
+                    os.remove(HISTORY_FILE)
+                except OSError:
+                    pass
+            logger.info("다운로드 완료 히스토리 %d건 삭제됨", count)
+            return count
+
+    def get_history(self) -> list[dict]:
+        """완료 히스토리 목록을 반환합니다."""
+        with self._lock:
+            return list(self._completed_history.values())
+
+    def _start_workers(self):
+        self.configure_workers(
+            self.settings_getter().get("max_concurrent_downloads", 3)
+        )
+
+    def configure_workers(self, count):
+        """Apply concurrency changes; running downloads finish before workers retire."""
+        if type(count) is not int or not 1 <= count <= 32:
+            raise ValueError("Worker count must be between 1 and 32")
+        with self._lock:
+            self._max_workers = count
+            for index in range(len(self._worker_threads), count):
+                worker = threading.Thread(
+                    target=self._worker_loop,
+                    args=(index,),
+                    name=f"DownloaderWorker-{index}",
+                    daemon=True,
+                )
+                self._worker_threads.append(worker)
+                worker.start()
+
+    def subscribe(self) -> queue.Queue:
+        """SSE 클라이언트를 위한 이벤트 큐를 등록합니다."""
+        q = queue.Queue(maxsize=100)
+        with self._lock:
+            self._listeners.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue):
+        """SSE 클라이언트 연결 해제 시 큐를 제거합니다."""
+        with self._lock:
+            if q in self._listeners:
+                self._listeners.remove(q)
+
+    def _broadcast(self, event_type: str, data: dict | None = None):
+        """모든 연결된 SSE 클라이언트에게 이벤트를 푸시합니다."""
+        payload = {
+            "type": event_type,
+            "timestamp": time.time(),
+            "data": data or {},
+        }
+        with self._lock:
+            for q in list(self._listeners):
+                try:
+                    q.put_nowait(payload)
+                except queue.Full:
+                    pass
+
+    def add_url(
+        self,
+        url: str,
+        filename: str = "",
+        options: dict | None = None,
+        subfolder: str = "",
+        skip_duplicate: bool = False,
+        register_duplicate_as_failed: bool = False,
+        is_auto: bool = False,
+    ) -> DownloadJob | None:
+        """새로운 다운로드 링크를 큐에 추가합니다 (skip_duplicate=True 시 중복 검사)."""
+        url = clean_url(url)
+        if not url:
+            raise ValueError("A valid download URL is required")
+
+        settings = self.settings_getter()
+        should_check_dup = skip_duplicate and bool(
+            settings.get("check_duplicate_url", True)
+        )
+
+        download_dir = settings.get("download_dir")
+
+        job_options = dict(settings)
+        if options:
+            job_options.update(options)
+        if is_auto:
+            job_options["is_auto"] = True
+        elif "is_auto" not in job_options:
+            job_options["is_auto"] = False
+        if subfolder:
+            job_options["subfolder"] = subfolder
+
+        job = DownloadJob(url=url, download_dir=download_dir, options=job_options)
+        if filename:
+            job.filename = filename
+        with self._lock:
+            if should_check_dup:
+                is_dup, reason, _ = self.is_duplicate_url(url)
+                if is_dup:
+                    logger.info("중복 다운로드 링크 자동 제외: %s (%s)", url, reason)
+                    if not register_duplicate_as_failed:
+                        return None
+                    job.status = "failed"
+                    job.error_message = f"중복 다운로드 링크 자동 제외 ({reason})"
+                    job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    job.speed_bps = 0.0
+                    job.speed_str = "0 KB/s"
+                    self.jobs[job.id] = job
+                    self._broadcast("job_added", job.to_dict())
+                    self._broadcast("job_updated", job.to_dict())
+                    self._broadcast("stats_updated", self.get_stats())
+                    return job
+            self.jobs[job.id] = job
+            self._broadcast("job_added", job.to_dict())
+            self.queue.put(job.id)
+
+        logger.info(
+            f"작업 추가됨: ID={job.id}, URL={url}, 파일명={filename}, 서브폴더={subfolder}"
+        )
+        return job
+
+    def add_urls(
+        self,
+        urls: List,
+        subfolder: str = "",
+        force: bool = False,
+        register_duplicate_as_failed: bool = False,
+        is_auto: bool = False,
+    ) -> List[DownloadJob]:
+        """여러 URL을 일괄 추가합니다 (force=False 시 중복 링크는 자동 제외)."""
+        check_dup = not force and bool(
+            self.settings_getter().get("check_duplicate_url", True)
+        )
+        added = []
+        for item in urls:
+            if isinstance(item, dict):
+                u = item.get("url", "").strip()
+                fn = item.get("name") or item.get("filename") or ""
+                opt = dict(item.get("options") or {})
+                if is_auto and "is_auto" not in opt:
+                    opt["is_auto"] = True
+                sf = item.get("subfolder") or subfolder
+                if u and not u.startswith("#"):
+                    job = self.add_url(
+                        u,
+                        filename=fn,
+                        options=opt,
+                        subfolder=sf,
+                        skip_duplicate=check_dup,
+                        register_duplicate_as_failed=register_duplicate_as_failed,
+                        is_auto=opt.get("is_auto", is_auto),
+                    )
+                    if job is not None:
+                        added.append(job)
+            elif isinstance(item, str):
+                u_clean = item.strip()
+                if u_clean and not u_clean.startswith("#"):
+                    job = self.add_url(
+                        u_clean,
+                        subfolder=subfolder,
+                        skip_duplicate=check_dup,
+                        register_duplicate_as_failed=register_duplicate_as_failed,
+                        is_auto=is_auto,
+                    )
+                    if job is not None:
+                        added.append(job)
+        return added
+
+    def pause_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return False
+            if job.status == "downloading" and job.task:
+                job.task.pause()
+                job.status = "paused"
+                self._broadcast("job_updated", job.to_dict())
+                return True
+            elif job.status == "queued":
+                job.status = "paused"
+                self._broadcast("job_updated", job.to_dict())
+                return True
+        return False
+
+    def resume_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            if (
+                not job
+                or job.status != "paused"
+                or job.task is not None
+                or job.thread is not None
+            ):
+                return False
+            job.status = "queued"
+            self.queue.put(job.id)
+            self._broadcast("job_updated", job.to_dict())
+            return True
+
+    def cancel_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return False
+            if job.task:
+                job.task.stop()
+            job.status = "cancelled"
+            job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            job.speed_bps = 0.0
+            job.speed_str = "0 KB/s"
+            self._broadcast("job_updated", job.to_dict())
+            return True
+
+    def _find_part_path(self, job: DownloadJob) -> Optional[str]:
+        """작업의 임시 .part 파일 경로를 찾습니다."""
+        if not job.download_dir or not os.path.isdir(job.download_dir):
+            return None
+        # 1. job.id 기반 part 파일 탐색
+        pattern = os.path.join(job.download_dir, f"*.{job.id}.part")
+        matches = glob.glob(pattern)
+        if matches and os.path.isfile(matches[0]):
+            return matches[0]
+        # 2. filename 기반 part 파일 탐색
+        if job.filename:
+            direct_part = os.path.join(job.download_dir, f"{job.filename}.part")
+            if os.path.isfile(direct_part):
+                return direct_part
+        return None
+
+    def _cleanup_part_file(self, job: DownloadJob):
+        """사용자가 작업을 삭제하거나 목록을 비울 때 임시 .part 파일을 삭제합니다."""
+        try:
+            part_path = self._find_part_path(job)
+            if part_path and os.path.exists(part_path):
+                os.remove(part_path)
+                logger.info("임시 .part 파일 정리 완료: %s", part_path)
+        except Exception as e:
+            logger.warning("임시 .part 파일 정리 중 오류: %s", e)
+
+    def retry_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            if (
+                not job
+                or job.status not in ("failed", "cancelled", "completed")
+                or job.task is not None
+                or job.thread is not None
+            ):
+                return False
+
+            # 재시도 시 영구 완료 내역에서 제거하여 중복 차단 방지
+            c_key = canonical_url_key(job.original_url)
+            if c_key and c_key in self._completed_history:
+                del self._completed_history[c_key]
+                self._save_history()
+
+            job.status = "queued"
+            job.error_message = ""
+            job.completed_at = None
+            job.speed_bps = 0.0
+            job.speed_str = "0 KB/s"
+
+            # .part 파일이 디스크에 남아있다면 크기를 확인하여 진행도 유지 (이어받기 준비)
+            part_path = self._find_part_path(job)
+            if part_path and os.path.exists(part_path):
+                part_size = os.path.getsize(part_path)
+                job.downloaded_bytes = part_size
+                if job.total_bytes and job.total_bytes > 0:
+                    job.progress = min(100.0, (part_size / job.total_bytes) * 100.0)
+                logger.info(
+                    "작업 %s 재시도: 기존 .part 파일(%d bytes) 감지하여 이어받기 대기",
+                    job.id,
+                    part_size,
+                )
+            else:
+                job.downloaded_bytes = 0
+                job.progress = 0.0
+
+            self.queue.put(job.id)
+            self._broadcast("job_updated", job.to_dict())
+            self._broadcast("stats_updated", self.get_stats())
+            return True
+
+    def remove_job(self, job_id: str) -> bool:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            if not job:
+                return False
+            if job.task:
+                job.task.stop()
+            self._cleanup_part_file(job)
+            del self.jobs[job_id]
+            self._broadcast("job_removed", {"id": job_id})
+            return True
+
+    def clear_jobs(self, status_filter: str = "finished") -> int:
+        """완료, 실패 또는 전체 작업들을 일괄 삭제합니다.
+
+        status_filter:
+          - 'completed': 완료된 작업만 일괄 삭제
+          - 'failed': 실패 및 취소된 작업만 일괄 삭제
+          - 'finished': 완료 및 실패/취소된 모든 작업 삭제
+          - 'all': 전체 작업 일괄 삭제 (진행 중인 작업은 중지 후 삭제)
+        """
+        with self._lock:
+            to_delete = []
+            for job_id, job in self.jobs.items():
+                if status_filter == "completed":
+                    if job.status == "completed":
+                        to_delete.append(job_id)
+                elif status_filter == "failed":
+                    if job.status in ("failed", "cancelled"):
+                        to_delete.append(job_id)
+                elif status_filter == "finished":
+                    if job.status in ("completed", "failed", "cancelled"):
+                        to_delete.append(job_id)
+                elif status_filter == "all":
+                    if job.task:
+                        job.task.stop()
+                    to_delete.append(job_id)
+
+            for jid in to_delete:
+                job = self.jobs.get(jid)
+                if job:
+                    if job.task:
+                        job.task.stop()
+                    self._cleanup_part_file(job)
+                del self.jobs[jid]
+                self._broadcast("job_removed", {"id": jid})
+
+            if to_delete:
+                self._broadcast("stats_updated", self.get_stats())
+            return len(to_delete)
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        with self._lock:
+            job = self.jobs.get(job_id)
+            return job.to_dict() if job else None
+
+    def get_all_jobs(self) -> List[dict]:
+        with self._lock:
+            # 등록 역순(최신 등록이 위로) 반환
+            return [j.to_dict() for j in reversed(list(self.jobs.values()))]
+
+    def get_stats(self) -> dict:
+        with self._lock:
+            total_count = len(self.jobs)
+            downloading_count = sum(
+                1 for j in self.jobs.values() if j.status == "downloading"
+            )
+            completed_count = sum(
+                1 for j in self.jobs.values() if j.status == "completed"
+            )
+            failed_count = sum(
+                1 for j in self.jobs.values() if j.status in ("failed", "cancelled")
+            )
+            total_speed = sum(
+                j.speed_bps for j in self.jobs.values() if j.status == "downloading"
+            )
+            total_downloaded = sum(j.downloaded_bytes for j in self.jobs.values())
+
+            return {
+                "total_count": total_count,
+                "downloading_count": downloading_count,
+                "completed_count": completed_count,
+                "failed_count": failed_count,
+                "total_speed_str": format_speed(total_speed),
+                "total_speed_bps": total_speed,
+                "total_downloaded_str": format_bytes(total_downloaded),
+            }
+
+    def _worker_loop(self, worker_index=0):
+        """백그라운드에서 큐를 감시하며 작업을 수행하는 워커 루프."""
+        while not self._stop_event.is_set():
+            if worker_index >= self._max_workers:
+                self._stop_event.wait(0.5)
+                continue
+            try:
+                job_id = self.queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            with self._lock:
+                job = self.jobs.get(job_id)
+                if not job or job.status != "queued":
+                    self.queue.task_done()
+                    continue
+                job.thread = threading.current_thread()
+                job.status = "resolving"
+                self._broadcast("job_updated", job.to_dict())
+
+            # 1. 링크 해석 (Resolving)
+            try:
+                settings = self.settings_getter()
+                resolve_opts = dict(settings)
+                if job.options:
+                    resolve_opts.update(job.options)
+                if job.filename:
+                    resolve_opts["filename"] = job.filename
+
+                pre_resolved = (
+                    job.options.pop("_pre_resolved", None) if job.options else None
+                )
+                resolved = pre_resolved or default_dispatcher.resolve(
+                    job.original_url, options=resolve_opts
+                )
+                with self._lock:
+                    if self.jobs.get(job_id) is not job or job.status != "resolving":
+                        job.thread = None
+                        self.queue.task_done()
+                        continue
+
+                # 클라우드 저장 작업인 경우 (예: 테라박스 내 계정에 담기) 로컬 다운로드 스킵 후 즉시 완료 처리
+                if resolved.get("is_cloud_transfer"):
+                    with self._lock:
+                        if (
+                            self.jobs.get(job_id) is not job
+                            or job.status != "resolving"
+                        ):
+                            job.thread = None
+                            self.queue.task_done()
+                            continue
+                        job.service_name = resolved.get(
+                            "source_service", "TeraBox (클라우드 저장)"
+                        )
+                        job.status = "completed"
+                        job.filename = resolved.get("filename", job.filename)
+                        job.file_path = resolved.get(
+                            "cloud_path", "내 테라박스 클라우드"
+                        )
+                        size_b = resolved.get("size", 0)
+                        job.downloaded_bytes = size_b
+                        job.total_bytes = size_b
+                        job.progress = 100.0
+                        job.speed_bps = 0.0
+                        job.speed_str = "완료"
+                        job.eta_str = "저장 완료"
+                        job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        self._broadcast("job_updated", job.to_dict())
+                    logger.info(
+                        f"작업 {job.id} 테라박스 클라우드 저장 완료: {job.filename} -> {job.file_path}"
+                    )
+                    job.thread = None
+                    self.queue.task_done()
+                    continue
+
+                # 서브폴더 결정 및 격리 적용
+                target_subfolder = ""
+                if not job.options.get("subfolder_applied"):
+                    user_subfolder = job.options.get("subfolder", "").strip()
+                    auto_subfolder = settings.get("auto_subfolder", True)
+                    rule = settings.get("subfolder_rule", "package_or_title")
+
+                    if user_subfolder:
+                        target_subfolder = sanitize_folder_name(user_subfolder)
+                    elif (
+                        auto_subfolder
+                        and rule == "package_or_title"
+                        and (resolved.get("subfolder") or resolved.get("article_title"))
+                    ):
+                        target_subfolder = sanitize_folder_name(
+                            resolved.get("subfolder")
+                            or resolved.get("article_title")
+                            or ""
+                        )
+                    elif auto_subfolder and rule == "date":
+                        target_subfolder = datetime.now().strftime("%Y-%m-%d")
+                    elif auto_subfolder and rule == "service":
+                        target_subfolder = sanitize_folder_name(
+                            str(resolved.get("source_service") or "Direct")
+                        )
+
+                    if target_subfolder:
+                        job.download_dir = os.path.join(
+                            job.download_dir, target_subfolder
+                        )
+                        job.options["subfolder_applied"] = True
+                        os.makedirs(job.download_dir, exist_ok=True)
+                        logger.info(
+                            f"작업 {job.id} 저장 서브폴더 적용: {job.download_dir}"
+                        )
+
+                should_capture = (
+                    bool(job.options.get("capture_page"))
+                    if "capture_page" in (job.options or {})
+                    else bool(settings.get("capture_source_page", False))
+                )
+                if should_capture and not job.options.get("_page_captured"):
+                    job.options["_page_captured"] = True
+                    capture_target_url = str(
+                        resolved.get("source_page_url")
+                        or (job.options or {}).get("referer")
+                        or job.original_url
+                        or ""
+                    ).strip()
+                    capture_title = str(
+                        resolved.get("article_title")
+                        or resolved.get("subfolder")
+                        or target_subfolder
+                        or os.path.splitext(
+                            resolved.get("filename") or job.filename or "page"
+                        )[0]
+                    ).strip()
+                    if capture_target_url.lower().startswith(("http://", "https://")):
+                        from .browser_solver import capture_full_page_screenshot
+
+                        threading.Thread(
+                            target=capture_full_page_screenshot,
+                            args=(capture_target_url, job.download_dir, capture_title),
+                            name=f"PageCapture-{job.id[:8]}",
+                            daemon=True,
+                        ).start()
+
+                with self._lock:
+                    if self.jobs.get(job_id) is not job or job.status != "resolving":
+                        job.thread = None
+                        self.queue.task_done()
+                        continue
+                    job.service_name = resolved.get("source_service", "Direct")
+                    job.resolved_url = resolved["url"]
+                    if resolved.get("filename"):
+                        job.filename = resolved["filename"]
+                    if resolved.get("options"):
+                        job.options.update(resolved["options"])
+                    job.status = "downloading"
+                    self._broadcast("job_updated", job.to_dict())
+
+                # 다중 첨부파일이 발견된 경우 (예: 네이버 카페 / 티스토리 분할 압축 등) 나머지 파일들도 큐에 자동 등록
+                extra_files = resolved.get("files", [])
+                if len(extra_files) > 1:
+                    logger.info(
+                        f"다중 첨부파일 감지: 추가 {len(extra_files) - 1}개 파일을 큐에 자동 등록합니다 (폴더: {job.download_dir})."
+                    )
+                    for extra in extra_files[1:]:
+                        extra_opts = dict(job.options)
+                        for key in ("headers", "cookies", "referer"):
+                            if resolved.get(key):
+                                extra_opts[key] = resolved[key]
+                        extra_opts["subfolder_applied"] = True
+                        if "referer" in extra:
+                            extra_opts["referer"] = extra["referer"]
+                        if "headers" in extra:
+                            extra_opts["headers"] = extra["headers"]
+                        if "cookies" in extra:
+                            extra_opts["cookies"] = extra["cookies"]
+                        new_job = DownloadJob(
+                            url=extra["url"],
+                            download_dir=job.download_dir,
+                            options=extra_opts,
+                        )
+                        new_job.filename = extra.get("name", "")
+                        new_job.resolved_url = extra["url"]
+                        new_job.service_name = resolved.get("source_service", "Direct")
+                        with self._lock:
+                            if (
+                                self.jobs.get(job_id) is not job
+                                or job.status != "downloading"
+                            ):
+                                break
+                            self.jobs[new_job.id] = new_job
+                            self._broadcast("job_added", new_job.to_dict())
+                            self.queue.put(new_job.id)
+
+                for extra in resolved.get("extra_jobs", []):
+                    with self._lock:
+                        if (
+                            self.jobs.get(job_id) is not job
+                            or job.status != "downloading"
+                        ):
+                            break
+                        extra_opts = dict(job.options)
+                        extra_opts.update(extra.get("options", {}))
+                        extra_opts["subfolder_applied"] = True
+                        new_job = DownloadJob(
+                            extra["url"], job.download_dir, extra_opts
+                        )
+                        new_job.filename = extra.get("filename", "")
+                        self.jobs[new_job.id] = new_job
+                        self._broadcast("job_added", new_job.to_dict())
+                        self.queue.put(new_job.id)
+
+            except Exception as e:
+                logger.exception(f"작업 {job_id} 링크 분석 실패: {e}")
+                with self._lock:
+                    if self.jobs.get(job_id) is job and job.status in (
+                        "resolving",
+                        "downloading",
+                    ):
+                        job.status = "failed"
+                        job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        job.error_message = f"링크 분석 실패: {e}"
+                        self._broadcast("job_updated", job.to_dict())
+                job.thread = None
+                self.queue.task_done()
+                continue
+
+            # 2. 다운로드 수행 (Downloading)
+            def on_progress(
+                downloaded_bytes, total_bytes, speed_bps, progress, eta_seconds
+            ):
+                if job is None:
+                    return
+                with self._lock:
+                    if self.jobs.get(job_id) is not job or job.status != "downloading":
+                        return
+                    job.downloaded_bytes = downloaded_bytes
+                    job.total_bytes = total_bytes
+                    job.speed_bps = speed_bps
+                    job.speed_str = format_speed(speed_bps)
+                    job.progress = progress
+                    job.eta_seconds = eta_seconds
+                    job.eta_str = format_eta(eta_seconds)
+                self._broadcast(
+                    "job_progress",
+                    {
+                        "id": job.id,
+                        "downloaded_bytes": downloaded_bytes,
+                        "total_bytes": total_bytes,
+                        "downloaded_str": format_bytes(downloaded_bytes),
+                        "total_str": format_bytes(total_bytes),
+                        "speed_bps": speed_bps,
+                        "speed_str": job.speed_str,
+                        "progress": round(progress, 1),
+                        "eta_str": job.eta_str,
+                    },
+                )
+
+            try:
+                if resolved.get("task_factory"):
+                    task = resolved["task_factory"](job, job.download_dir, on_progress)
+                else:
+                    from .addons import addon_registry
+
+                    addon = addon_registry.find_for_service(job.service_name)
+                    if addon and addon.can_restore_task(job):
+                        task = addon.restore_task(job, on_progress, settings)
+                    elif job.options.get("mega_file_id") and job.options.get(
+                        "mega_key_a32"
+                    ):
+                        from .resolvers.mega import MegaDownloadTask
+
+                        task = MegaDownloadTask(
+                            url=job.resolved_url or job.original_url,
+                            dest_dir=job.download_dir,
+                            filename=job.filename,
+                            partial_id=job.id,
+                            file_id=job.options.get("mega_file_id"),
+                            key_a32=job.options.get("mega_key_a32"),
+                            file_size=job.options.get("mega_file_size"),
+                            chunk_size=settings.get("chunk_size_kb", 512) * 1024,
+                            progress_callback=on_progress,
+                        )
+                    elif job.options.get("node_handle") and job.options.get("node_key"):
+                        from .resolvers.transferit import TransferitDownloadTask
+
+                        task = TransferitDownloadTask(
+                            url=job.resolved_url,
+                            dest_dir=job.download_dir,
+                            filename=job.filename,
+                            partial_id=job.id,
+                            password=job.options.get("password"),
+                            node_handle=job.options.get("node_handle"),
+                            node_key=job.options.get("node_key"),
+                            node_size=job.options.get("node_size"),
+                            pw_token=job.options.get("pw_token"),
+                            xh=job.options.get("xh"),
+                            chunk_size=settings.get("chunk_size_kb", 512) * 1024,
+                            progress_callback=on_progress,
+                        )
+                    else:
+                        task = DownloadTask(
+                            url=job.resolved_url,
+                            dest_dir=job.download_dir,
+                            filename=job.filename,
+                            partial_id=job.id,
+                            headers=resolved.get("headers")
+                            or job.options.get("headers"),
+                            cookies=resolved.get("cookies")
+                            or job.options.get("cookies"),
+                            referer=resolved.get("referer")
+                            or job.options.get("referer"),
+                            chunk_size=settings.get("chunk_size_kb", 256) * 1024,
+                            progress_callback=on_progress,
+                        )
+                with self._lock:
+                    if self.jobs.get(job_id) is not job or job.status != "downloading":
+                        job.thread = None
+                        self.queue.task_done()
+                        continue
+                    job.task = task
+                result = task.run()
+                if not isinstance(result, dict):
+                    raise ValueError("Download task returned an invalid result")
+                # DownloadTask reports failures as results rather than exceptions.
+                if result.get("status") == "failed" and "웹페이지(HTML)" in result.get(
+                    "error", ""
+                ):
+                    raise ValueError(result["error"])
+            except Exception as exc:
+                if (
+                    "웹페이지(HTML)" in str(exc)
+                    and resolved.get("source_service") == "Direct"
+                    and not job.options.get("_webpage_fallback_tried")
+                ):
+                    try:
+                        from .resolvers.webpage import WebPageResolver
+
+                        wp_resolved = WebPageResolver().resolve(
+                            job.original_url, options=resolve_opts
+                        )
+                        if wp_resolved and wp_resolved.get("url"):
+                            logger.info(
+                                "웹페이지(%s)에서 다운로드 링크 자동 검출 성공 -> 작업 재큐잉",
+                                job.original_url,
+                            )
+                            with self._lock:
+                                if (
+                                    self.jobs.get(job_id) is not job
+                                    or job.status != "downloading"
+                                ):
+                                    job.task = None
+                                    job.thread = None
+                                    self.queue.task_done()
+                                    continue
+                                job.options["_webpage_fallback_tried"] = True
+                                job.options["_pre_resolved"] = wp_resolved
+                                job.status = "queued"
+                                job.task = None
+                                job.thread = None
+                                self._broadcast("job_updated", job.to_dict())
+                                self.queue.put(job.id)
+                            self.queue.task_done()
+                            continue
+                    except Exception as wp_err:
+                        logger.warning(
+                            "웹페이지 내 다운로드 링크 검출 실패: %s", wp_err
+                        )
+                logger.exception("작업 %s 다운로드 실패", job_id)
+                part_size = 0
+                p_file = self._find_part_path(job)
+                if p_file and os.path.exists(p_file):
+                    try:
+                        part_size = os.path.getsize(p_file)
+                    except OSError:
+                        pass
+                result = {
+                    "status": "failed",
+                    "error": str(exc),
+                    "downloaded_bytes": part_size or job.downloaded_bytes,
+                    "total_bytes": job.total_bytes,
+                }
+
+            with self._lock:
+                if self.jobs.get(job_id) is not job or job.status == "cancelled":
+                    job.task = None
+                    job.thread = None
+                    self.queue.task_done()
+                    continue
+                if job.task and getattr(job.task, "filename", ""):
+                    job.filename = job.task.filename
+                final_status = result.get("status")
+                if final_status == "completed":
+                    job.status = "completed"
+                    job.filename = result.get("filename", job.filename)
+                    job.file_path = result.get("file_path", "")
+                    job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    job.speed_bps = 0.0
+                    job.speed_str = "0 KB/s"
+                    job.eta_str = "완료"
+                    self._record_completed_history(job)
+                elif final_status == "paused":
+                    job.status = "paused"
+                    job.speed_bps = 0.0
+                    job.speed_str = "0 KB/s"
+                elif final_status == "cancelled":
+                    job.status = "cancelled"
+                    job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    job.speed_bps = 0.0
+                    job.speed_str = "0 KB/s"
+                else:
+                    job.status = "failed"
+                    job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    job.error_message = result.get("error", "다운로드 실패")
+                    job.speed_bps = 0.0
+                    job.speed_str = "0 KB/s"
+                    if (
+                        "downloaded_bytes" in result
+                        and result["downloaded_bytes"] is not None
+                    ):
+                        job.downloaded_bytes = result["downloaded_bytes"]
+                    if "total_bytes" in result and result["total_bytes"] is not None:
+                        job.total_bytes = result["total_bytes"]
+                    if job.total_bytes and job.total_bytes > 0:
+                        job.progress = min(
+                            100.0, (job.downloaded_bytes / job.total_bytes) * 100.0
+                        )
+
+                job.task = None
+                job.thread = None
+                self._broadcast("job_updated", job.to_dict())
+
+            self.queue.task_done()

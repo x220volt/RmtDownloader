@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.log
+
+# PyInstaller & Build
+build/
+dist/
+*.spec
+
+# Linter & Cache
+.ruff_cache/
+
+# Editors
+.vscode/
+.idea/
+
+# Local data & caches (sensitive configs & personal histories)
+settings.json
+download_history.json
+kone_seen_posts.json
+kone_watcher_state.json
+data/
+scratch*
+
+# OS artifacts
+Thumbs.db
+.DS_Store

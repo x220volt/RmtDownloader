@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f1420">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="원격 다운로더">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>원격 다운로더 | Remote Downloader</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.59V8a1 1 0 0 0-2 0v8.59l-2.29-2.3a1 1 0 0 0-1.42 1.42l4 4a1 1 0 0 0 1.42 0l4-4a1 1 0 0 0-1.42-1.42z'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.34') }}">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 상단 헤더 -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </div>
+        <div>
+          <h1 class="logo-title">Remote Downloader</h1>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.34') }}</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="server-status-pill" id="serverStatusBadge">
+          <span class="status-dot pulse"></span>
+          <span class="status-text">서버 연결됨</span>
+        </div>
+        <div class="user-pill" id="userPill" title="로그인된 계정">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;color:var(--accent-primary);">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          <span id="currentUsernameText">admin</span>
+        </div>
+        <button class="icon-btn" id="settingsBtn" title="설정">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+        <a href="/logout" class="icon-btn" title="로그아웃" style="text-decoration:none;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+        </a>
+      </div>
+    </header>
+
+    <!-- 실시간 통계 바 -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon-wrapper blue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+            <polyline points="17 6 23 6 23 12"></polyline>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">다운로드 속도</span>
+          <span class="stat-value" id="statSpeed">0 KB/s</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon-wrapper purple">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">진행 중 / 대기</span>
+          <span class="stat-value" id="statActive">0개</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon-wrapper green">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">완료된 파일</span>
+          <span class="stat-value" id="statCompleted">0개</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 다운로드 입력 카드 -->
+    <section class="card input-card">
+      <div class="card-header">
+        <h2 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+          새 다운로드 추가
+        </h2>
+      </div>
+
+      <form id="downloadForm" class="download-form">
+        <div class="input-wrapper">
+          <textarea
+            id="urlInput"
+            class="url-textarea"
+            placeholder="다운로드할 URL, 마그넷 링크 (magnet:?xt=...) 또는 Base64 링크를 입력하거나 드래그해서 놓으세요 (.torrent 파일 지원)"
+            rows="3"
+            required
+          ></textarea>
+          <div class="input-action-buttons">
+            <button type="button" class="paste-btn" id="torrentFileBtn" title=".torrent 파일 추가">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              .torrent 파일
+            </button>
+            <button type="button" class="paste-btn" id="pasteBtn" title="클립보드 내용 붙여넣기">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+              </svg>
+              붙여넣기
+            </button>
+          </div>
+          <input type="file" id="torrentFileInput" accept=".torrent" style="display:none">
+        </div>
+
+        <div class="sub-inputs-row">
+          <div class="sub-input-box folder-input-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <input
+              type="text"
+              id="subfolderInput"
+              class="subfolder-input"
+              placeholder="📁 저장 서브폴더 직접 지정 (비워두면 자동 분류)"
+            >
+          </div>
+          <div class="sub-input-box pwd-input-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+            </svg>
+            <input
+              type="text"
+              id="teraboxPwdInput"
+              class="terabox-pwd-input"
+              placeholder="TeraBox 암호"
+              autocomplete="off"
+            >
+          </div>
+
+
+
+
+        </div>
+
+
+        <div class="form-footer">
+          <div class="save-path-hint" id="savePathHint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            저장 위치: <span id="downloadDirText">로딩 중...</span>
+          </div>
+          <button type="submit" class="submit-btn" id="submitBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            다운로드 시작
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 작업 목록 섹션 -->
+    <section class="card jobs-card">
+      <div class="jobs-header">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="active" id="tabActiveBtn">
+            <span class="tab-label-full">진행 중 / 대기</span><span class="tab-label-short">진행/대기</span> <span class="tab-count" id="activeCountBadge">0</span>
+          </button>
+          <button class="tab-btn" data-tab="completed" id="tabCompletedBtn">
+            <span class="tab-label-full">완료됨</span><span class="tab-label-short">완료</span> <span class="tab-count" id="completedCountBadge">0</span>
+          </button>
+          <button class="tab-btn" data-tab="failed" id="tabFailedBtn">
+            <span class="tab-label-full">실패 / 취소</span><span class="tab-label-short">실패</span> <span class="tab-count" id="failedCountBadge">0</span>
+          </button>
+          <button class="tab-btn" data-tab="all" id="tabAllBtn">
+            <span class="tab-label-full">전체</span><span class="tab-label-short">전체</span> <span class="tab-count" id="allCountBadge">0</span>
+          </button>
+        </div>
+        <div class="jobs-actions">
+          <button type="button" class="btn-clear-action" id="clearCompletedBtn" title="완료된 다운로드 목록 한번에 지우기">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>완료 비우기</span>
+          </button>
+          <button type="button" class="btn-clear-action danger" id="clearFailedBtn" title="실패 및 취소된 다운로드 목록 한번에 지우기">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+            <span>실패 비우기</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="jobs-list" id="jobsList">
+        <!-- 작업 카드가 동적으로 삽입됩니다 -->
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </div>
+          <p class="empty-title">다운로드 대기 중인 작업이 없습니다</p>
+          <p class="empty-desc">상단에 다운로드 링크를 입력하여 서버 PC에 원격 다운로드를 지시해보세요.</p>
+        </div>
+      </div>
+
+      <!-- 작업 목록 페이징 네비게이션 (10개 단위 분할 표시) -->
+      <div class="jobs-pagination-wrapper" id="jobsPaginationWrapper" style="display: none;">
+        <div class="pagination-info" id="paginationInfo"></div>
+        <div class="pagination-controls" id="paginationControls"></div>
+        <div class="pagination-size-select">
+          <select id="pageSizeSelect" class="page-size-select" title="페이지당 표시 개수">
+            <option value="10" selected>10개씩 보기</option>
+            <option value="20">20개씩 보기</option>
+            <option value="50">50개씩 보기</option>
+          </select>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 설정 모달 -->
+  <div class="modal-backdrop" id="settingsModal">
+    <div class="modal" style="max-width: 720px;">
+      <div class="modal-header">
+        <h3 class="modal-title">⚙️ 시스템 환경설정</h3>
+        <button class="close-btn" id="closeSettingsModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="settingsForm">
+          <!-- 설정 탭 네비게이션 -->
+          <div class="settings-tab-bar">
+            <button type="button" class="settings-tab-btn active" data-settings-tab="general">
+              📁 일반 & 저장
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="cloud">
+              ☁️ 클라우드 계정
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="automation">
+              🤖 자동화 감시
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="security">
+              🔒 보안 & 연동
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="extension">
+              🧩 크롬 확장
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="mobile">
+              📱 스마트폰 가이드
+            </button>
+            <button type="button" class="settings-tab-btn" data-settings-tab="platforms">
+              🌐 지원 플랫폼
+            </button>
+          </div>
+
+          <!-- 1. 일반 & 저장 탭 -->
+          <div class="settings-tab-pane active" id="settingsTabGeneral">
+            <div class="form-group">
+              <label class="form-label" for="settingDownloadDir">PC 다운로드 저장 경로</label>
+              <input type="text" id="settingDownloadDir" class="form-input" required>
+              <span class="form-help">다운로드된 파일이 저장될 서버 PC의 로컬 디렉토리 경로입니다.</span>
+            </div>
+
+            <div class="settings-grid-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+              <div>
+                <label class="form-label" for="settingPort">서버 포트 (Port)</label>
+                <input type="number" id="settingPort" class="form-input" min="1" max="65535" value="7971" required>
+                <span class="form-help">웹 서버 접속 포트 (기본: 7971, 변경 후 재시작 시 적용)</span>
+              </div>
+              <div>
+                <label class="form-label" for="settingMaxWorkers">동시 다운로드 개수</label>
+                <input type="number" id="settingMaxWorkers" class="form-input" min="1" max="10" value="3">
+                <span class="form-help">동시 실행 스레드 수 (1~10)</span>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label class="form-label" for="settingSubfolderRule">자동 폴더 분류 규칙</label>
+              <select id="settingSubfolderRule" class="form-input" style="background: var(--bg-card); color: var(--text-main);">
+                <option value="package_or_title">게시글/패키지명 우선 (기본)</option>
+                <option value="date">날짜별 (YYYY-MM-DD)</option>
+                <option value="service">서비스별 (Tistory 등)</option>
+                <option value="none">단일 폴더에 모두 저장</option>
+              </select>
+              <span class="form-help">다운로드 파일 자동 분류 방식</span>
+            </div>
+
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingAutoSubfolder" checked style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">게시글/패키지별 서브폴더 자동 생성</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">티스토리/네이버 카페 등 게시글 제목으로 하위 폴더를 만들어 첨부파일들을 분리 저장합니다.</span>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingCheckDuplicateUrl" checked style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">다운로드 링크 중복 체크 (이미 완료/진행 중인 링크 자동 건너뛰기)</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">동일한 링크가 이미 완료되었거나 대기열에 있을 때 중복 다운로드를 방지합니다.</span>
+              </div>
+
+              <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingCaptureSourcePage" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">📸 다운로드 링크가 포함된 원본 페이지 전체 캡처 함께 저장 (.png)</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">커뮤니티/블로그 게시글 링크나 크롬 확장으로 다운로드할 때, 해당 페이지 전체 화면을 캡처해 다운로드 폴더에 함께 보관합니다.</span>
+              </div>
+
+              <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingIgnoreSslCerts" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">🛡️ SSL 인증서 검증 무시 (자체 서명 / 사설 인증서 / 프록시 환경 연결 허용)</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">네이버 카페, 블로그, 웹서버 등에서 self-signed certificate, 인증서 만료 등으로 링크 분석이나 다운로드가 실패할 때 SSL 인증서 오류를 무시하고 다운로드를 계속합니다.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 클라우드 계정 탭 -->
+          <div class="settings-tab-pane" id="settingsTabCloud">
+            <!-- TeraBox 카드 -->
+            <div class="settings-card">
+              <div class="settings-card-title">
+                <span class="badge badge-terabox" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); font-size: 0.8rem; padding: 4px 8px;">TeraBox</span>
+                <span>테라박스 다운로드 & 보관 설정</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="settingTeraboxMode">링크 기본 처리 방식</label>
+                <select id="settingTeraboxMode" class="form-input" style="background: var(--bg-card); color: var(--text-main);">
+                  <option value="download">📥 서버 PC로 직접 다운로드 (기본값)</option>
+                  <option value="save">☁️ 내 테라박스 클라우드에 즉시 저장 (빠른 보관 후 앱 다운로드)</option>
+                </select>
+                <span class="form-help">테라박스 링크 추가 시 서버 PC 다운로드 또는 클라우드 즉시 보관을 선택합니다.</span>
+              </div>
+
+              <div class="form-group" id="settingTeraboxSavePathGroup">
+                <label class="form-label" for="settingTeraboxSavePath">클라우드 저장 대상 경로</label>
+                <input type="text" id="settingTeraboxSavePath" class="form-input" placeholder="/ 또는 /폴더명 (기본: /)">
+                <span class="form-help">내 테라박스에 저장하기 선택 시 파일이 보관될 내 드라이브 폴더 경로입니다.</span>
+              </div>
+
+              <div class="form-group">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label class="form-label" for="settingTeraboxCookie" style="margin-bottom: 0;">TeraBox 계정 쿠키 ndus (선택사항)</label>
+                  <button type="button" class="btn btn-secondary" id="toggleTeraboxCookieHelp" style="font-size: 0.74rem; padding: 2px 8px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.1); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                    <span>💡 쿠키(ndus) 알아내는 방법</span>
+                    <span id="teraboxCookieHelpArrow">▼</span>
+                  </button>
+                </div>
+                <input type="text" id="settingTeraboxCookie" class="form-input" placeholder="브라우저 개발자 도구에서 복사한 ndus 값 또는 전체 쿠키 붙여넣기" autocomplete="off">
+                <span class="form-help">테라박스 고속 다운로드 및 내 클라우드 즉시 저장 기능을 위해 사용됩니다.</span>
+
+                <!-- 테라박스 쿠키 확인 가이드 상자 -->
+                <div id="teraboxCookieHelpBox" style="display: none; margin-top: 10px; background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 0.8rem; line-height: 1.55; color: #cbd5e1;">
+                  <div style="font-weight: 700; color: #38bdf8; margin-bottom: 8px; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                    <span>🔍 테라박스 계정 쿠키(ndus) 값 알아내는 방법</span>
+                  </div>
+
+                  <div style="margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #f8fafc; margin-bottom: 4px;">방법 1. 개발자 도구 애플리케이션 탭에서 확인 (추천)</div>
+                    <ol style="margin: 0 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 3px;">
+                      <li>PC 브라우저(Chrome, Edge 등)에서 <a href="https://www.terabox.com" target="_blank" rel="noopener noreferrer" style="color: #93c5fd; text-decoration: underline;">terabox.com</a> 에 접속하여 로그인합니다.</li>
+                      <li>키보드 <kbd style="background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); font-size: 0.75rem;">F12</kbd> 키를 눌러 개발자 도구를 엽니다. (또는 우클릭 ➔ <strong>검사</strong>)</li>
+                      <li>상단 탭에서 <strong>애플리케이션(Application)</strong>을 선택합니다. (Edge는 '응용 프로그램')</li>
+                      <li>왼쪽 사이드바의 <strong>저장용량(스토리지) ➔ 쿠키(Cookies) ➔ https://www.terabox.com</strong> 을 클릭합니다.</li>
+                      <li>우측 쿠키 목록에서 이름(Name)이 <code style="color: #38bdf8; font-weight: 700;">ndus</code> 인 항목을 찾아, <strong>값(Value)</strong>을 더블 클릭해 복사합니다.</li>
+                      <li>복사한 값을 위 <strong>TeraBox 계정 쿠키</strong> 입력창에 붙여넣고 설정을 저장합니다.</li>
+                    </ol>
+                  </div>
+
+                  <div style="margin-bottom: 10px;">
+                    <div style="font-weight: 600; color: #f8fafc; margin-bottom: 4px;">방법 2. 콘솔(Console) 창에서 1줄 스크립트로 즉시 확인</div>
+                    <ol style="margin: 0 0 0 18px; padding: 0; display: flex; flex-direction: column; gap: 3px;">
+                      <li><a href="https://www.terabox.com" target="_blank" rel="noopener noreferrer" style="color: #93c5fd; text-decoration: underline;">terabox.com</a> 로그인 상태에서 <kbd style="background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); font-size: 0.75rem;">F12</kbd> ➔ <strong>콘솔(Console)</strong> 탭을 클릭합니다.</li>
+                      <li>아래 코드를 복사하여 콘솔창에 입력 후 <kbd style="background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); font-size: 0.75rem;">Enter</kbd>를 누릅니다:
+                        <div style="margin: 6px 0; background: #090d16; padding: 7px 10px; border-radius: 6px; font-family: Consolas, monospace; color: #a5f3fc; border: 1px solid rgba(56, 189, 248, 0.25); display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                          <span style="user-select: all; overflow-x: auto;">document.cookie.split('; ').find(r => r.startsWith('ndus='))?.split('=')[1]</span>
+                          <button type="button" class="btn btn-secondary" style="font-size: 0.68rem; padding: 2px 7px; flex-shrink: 0;" onclick="navigator.clipboard.writeText('document.cookie.split(\'; \').find(r => r.startsWith(\'ndus=\'))?.split(\'=\')[1]'); if(window.showToast) window.showToast('명령어가 복사되었습니다.');">📋 복사</button>
+                        </div>
+                      </li>
+                      <li>화면에 출력된 따옴표 속 영문/숫자 문자열(예: <code>YbKdYCKte...</code>)을 복사하여 붙여넣습니다.</li>
+                    </ol>
+                  </div>
+
+                  <div style="font-size: 0.74rem; color: #94a3b8; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 6px;">
+                    💡 <strong>팁:</strong> 개발자 도구의 Network 탭 등에서 <code>ndus=...; ...</code> 형태의 전체 쿠키 문자열을 복사해서 붙여넣어도 프로그램이 자동으로 <code>ndus</code> 값만 추출하여 적용합니다.
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" for="settingTeraboxPassword">TeraBox 기본 공유 암호 (선택사항)</label>
+                <input type="text" id="settingTeraboxPassword" class="form-input" placeholder="암호 걸린 링크에 공통 적용할 기본 비밀번호" autocomplete="off">
+                <span class="form-help">다운로드 링크에 비밀번호가 생략되었을 때 자동으로 대입할 기본 추출 암호입니다.</span>
+              </div>
+            </div>
+
+            <!-- GoFile 카드 -->
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <span class="badge badge-gofile" style="font-size: 0.8rem; padding: 4px 8px;">GoFile</span>
+                <span>고파일 계정 연동</span>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" for="settingGofileToken">GoFile API 계정 토큰 (선택사항)</label>
+                <input type="text" id="settingGofileToken" class="form-input" placeholder="비워두면 무료 게스트 토큰을 자동 사용합니다">
+                <span class="form-help">GoFile 프리미엄/VIP 계정이 있는 경우 토큰을 입력하면 최고 속도로 다운로드됩니다.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. 자동화 감시 탭 -->
+          <div class="settings-tab-pane" id="settingsTabAutomation">
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:#38bdf8;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <span>🎮 Kone.gg 게시판 새 글 자동 다운로드</span>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 14px;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingKoneAutoCheck" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">게시판 자동 감시 및 새 글 다운로드 자동 추가 활성화</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">지정한 게시판을 주기적으로 감시하여 새로운 글이 등록되면 본문의 다운로드 링크(Base64 포함)를 자동으로 찾아 큐에 등록합니다.</span>
+              </div>
+
+              <div id="koneOptionsContainer" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px;">
+                <div class="form-group" style="margin-bottom: 12px;">
+                  <label class="form-label" for="settingKoneBoardUrl">감시할 게시판 주소</label>
+                  <input type="url" id="settingKoneBoardUrl" class="form-input" placeholder="https://kone.gg/s/retrogame">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                  <div>
+                    <label class="form-label" for="settingKoneInterval">새 글 확인 주기 (초)</label>
+                    <input type="number" id="settingKoneInterval" class="form-input" min="30" max="86400" value="180">
+                    <span class="form-help" style="margin-top: 4px;">권장: 180초 (3분)</span>
+                  </div>
+                  <div>
+                    <label class="form-label" style="margin-top: 26px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                      <input type="checkbox" id="settingKoneSubfolder" checked style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                      <span style="color: #e2e8f0; font-size: 0.86rem; font-weight: 500;">글 제목으로 하위폴더 분리</span>
+                    </label>
+
+                  </div>
+                </div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.05); gap: 10px;">
+                  <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
+                    <span id="koneStatusBadge" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #64748b; margin-right: 6px;"></span>
+                    <span id="koneStatusText">대기 중</span>
+                  </div>
+                  <button type="button" class="btn btn-secondary" id="koneCheckNowBtn" style="font-size: 0.82rem; padding: 6px 12px; white-space: nowrap;">
+                    ⚡ 지금 즉시 새 글 확인
+                  </button>
+                </div>
+
+                <div id="koneWatermarkBox" style="margin-top: 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 10px 12px;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+                    <span style="font-size: 0.78rem; font-weight: 700; color: #34d399;">
+                      📌 현재 감시 기준점 (마지막으로 확인한 최신 게시글)
+                    </span>
+                    <div style="display: flex; gap: 6px;">
+                      <button type="button" class="btn btn-secondary" id="koneRescanLatestBtn" title="가장 최근에 올라온 일반 게시글 1개를 다시 스캔하여 다운로드 링크를 추출합니다." style="font-size: 0.72rem; padding: 3px 8px;">
+                        🔁 최신 글 다시 스캔
+                      </button>
+                      <button type="button" class="btn btn-secondary" id="koneResetWatermarkBtn" title="현재 게시판의 최신 글을 새로운 감시 시작 기준점으로 재설정합니다." style="font-size: 0.72rem; padding: 3px 8px;">
+                        📌 기준점 재설정
+                      </button>
+                    </div>
+                  </div>
+                  <div id="koneWatermarkContent" style="font-size: 0.84rem; color: #e2e8f0; line-height: 1.5;">
+                    아직 확인된 게시글 기준점이 없습니다. <strong>⚡ 지금 즉시 새 글 확인</strong> 또는 <strong>📌 기준점 재설정</strong>을 눌러주세요.
+                  </div>
+                  <div style="font-size: 0.73rem; color: #94a3b8; margin-top: 4px;">
+                    💡 위 기준점 게시글까지 확인이 완료되었습니다. 이 글 <strong>이후에 새로 올라오는 게시글</strong>부터 자동으로 다운로드합니다. (공지글 제외)
+                  </div>
+                </div>
+
+                <div id="koneRecentLogsContainer" style="margin-top: 10px; display: none;">
+                  <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">
+                    📋 최근 감시 게시글 처리 내역
+                  </div>
+                  <div id="koneRecentLogs" style="max-height: 140px; overflow-y: auto; font-size: 0.75rem; background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.06); padding: 6px 10px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. 보안 & 연동 탭 -->
+          <div class="settings-tab-pane" id="settingsTabSecurity">
+            <!-- 외부 연동 전용 API 토큰 카드 -->
+            <div class="settings-card">
+              <div class="settings-card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:#a855f7;"><path d="M21 2l-2 2m-2-2l2 2M3 21l9-9m0 0l3 3-9 9H3v-3zm0 0l3-3m6-6l3-3m0 0l3 3-3 3m0-6l-3 3"></path></svg>
+                <span>🔑 외부 연동 전용 API 토큰 (단축어 / 북마클릿용)</span>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+                스마트폰 단축어나 북마클릿에서 사용하는 <strong>다운로드 전용 토큰</strong>입니다. 웹 대시보드 로그인 권한이 없어 안전하며, 필요 시 언제든 재발급할 수 있습니다.
+              </p>
+              <div class="api-token-row" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="settingApiToken" readonly class="form-input" style="font-family: monospace; color: #c084fc; background: rgba(0,0,0,0.3); font-size: 0.84rem; flex: 1; min-width: 140px;" placeholder="토큰 로딩 중...">
+                <button type="button" class="btn btn-secondary" id="copyApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 14px;">📋 복사</button>
+                <button type="button" class="btn btn-secondary" id="regenApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 12px; color: #f87171; border-color: rgba(239,68,68,0.3);">🔄 재발급</button>
+              </div>
+            </div>
+
+            <!-- 웹 대시보드 로그인 계정 카드 -->
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--accent-primary);"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                <span>로그인 보안 계정 변경 (아이디 & 비밀번호 자유 변경)</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="settingAuthUsername">로그인 아이디 (ID)</label>
+                <input type="text" id="settingAuthUsername" class="form-input" required autocomplete="username" placeholder="로그인에 사용할 아이디 입력">
+                <span class="form-help">원하는 아이디(ID)로 언제든 자유롭게 변경할 수 있습니다.</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="settingAuthPassword">새 비밀번호 (Password)</label>
+                <input type="password" id="settingAuthPassword" class="form-input" placeholder="변경할 경우에만 새 비밀번호 입력" autocomplete="new-password">
+                <span class="form-help">비워두면 기존 비밀번호가 유지됩니다. 비밀번호는 scrypt 단방향 암호화 해시로 안전하게 저장됩니다.</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="settingAuthPasswordConfirm">새 비밀번호 확인 (Confirm Password)</label>
+                <input type="password" id="settingAuthPasswordConfirm" class="form-input" placeholder="새 비밀번호를 한 번 더 입력하세요" autocomplete="new-password">
+                <span class="form-help" id="settingAuthPasswordConfirmHelp">비밀번호 변경 시 오입력을 방지하기 위해 동일하게 한 번 더 입력해주세요.</span>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" for="settingSessionLifetime">브라우저 자동 로그아웃 시간 (세션 유지 기간)</label>
+                <select id="settingSessionLifetime" class="form-input">
+                  <option value="1">1일 (24시간)</option>
+                  <option value="7">7일 (1주일)</option>
+                  <option value="30">30일 (기본 / 권장)</option>
+                  <option value="90">90일 (3개월)</option>
+                  <option value="365">365일 (1년 / 장기 유지)</option>
+                </select>
+                <span class="form-help">브라우저를 닫아도 설정한 기간 동안 로그인 상태가 안전하게 유지됩니다.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. 크롬 확장 프로그램 가이드 탭 -->
+          <div class="settings-tab-pane" id="settingsTabExtension">
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <span>🧩 크롬 확장 프로그램 (우클릭 원격 전송 & 페이지 링크 스캐너)</span>
+              </div>
+              <p style="font-size: 0.86rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;">
+                웹서핑 중 아무 링크나 <strong>마우스 우클릭 ➔ [원격 다운로더로 보내기]</strong>를 누르거나, 확장 프로그램 팝업에서 현재 페이지의 다운로드/클라우드/마그넷 링크를 한 번에 스캔하여 서버 PC로 전송할 수 있습니다.
+              </p>
+
+              <div style="text-align: center; margin-bottom: 18px;">
+                <a href="/api/extension/download" download="RemoteDownloader-Extension.zip" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px; text-decoration: none; padding: 11px 20px; font-size: 0.9rem;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                  크롬 확장 프로그램 (.zip) 다운로드
+                </a>
+              </div>
+
+              <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 14px; font-size: 0.82rem; line-height: 1.65; color: var(--text-main);">
+                <strong style="color: #93c5fd; display: block; margin-bottom: 6px;">📌 10초 초간단 설치 및 설정 방법:</strong>
+                1. 위 버튼으로 <code>RemoteDownloader-Extension.zip</code> 다운로드 후 원하는 폴더에 압축을 풉니다.<br>
+                2. 크롬(또는 엣지/웨일/브레이브) 주소창에 <code style="background:rgba(255,255,255,0.1); padding:2px 6px; border-radius:4px;">chrome://extensions</code> 입력 후 이동합니다.<br>
+                3. 우측 상단의 <strong>[개발자 모드]</strong> 스위치를 켭니다.<br>
+                4. 좌측 상단 <strong>[압축해제된 확장 프로그램을 로드합니다]</strong>를 누르고 압축을 푼 폴더를 선택합니다.<br>
+                5. 브라우저 우측 상단 확장 프로그램 아이콘을 누르고 하단 <strong>[⚙️ 서버 및 계정 설정]</strong>을 열어 본인 <strong>서버 주소</strong>와 <strong>아이디/비밀번호</strong>를 입력한 뒤 <strong>[설정 저장]</strong>을 누르면 즉시 연동됩니다!
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. 스마트폰 (아이폰 / 안드로이드) 설정 가이드 탭 -->
+          <div class="settings-tab-pane" id="settingsTabMobile">
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <span>📱 스마트폰 (아이폰 / 안드로이드) 초간단 원격 다운로드 설정</span>
+              </div>
+              <p style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
+                아이폰(사파리)이나 갤럭시/안드로이드(삼성인터넷, 크롬)에서 웹서핑 중 <strong>단 한 번의 터치로 집 PC에 다운로드를 명령</strong>할 수 있는 설정 가이드입니다.
+              </p>
+
+              <!-- 서브 탭 버튼 -->
+              <div class="iphone-tab-bar" style="display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; overflow-x: auto;">
+                <button type="button" class="settings-subtab-btn active" data-iphone-tab="shortcut">🍎 아이폰 단축어</button>
+                <button type="button" class="settings-subtab-btn" data-iphone-tab="android">🤖 안드로이드 설정</button>
+                <button type="button" class="settings-subtab-btn" data-iphone-tab="bookmarklet">🔖 브라우저 북마클릿</button>
+                <button type="button" class="settings-subtab-btn" data-iphone-tab="pwa">📲 홈 화면 앱 (PWA)</button>
+                <button type="button" class="settings-subtab-btn" data-iphone-tab="external">🌐 외부/LTE 접속 팁</button>
+              </div>
+
+              <!-- 1. 아이폰 단축어 탭 -->
+              <div class="iphone-tab-pane" id="iphoneTabShortcut">
+                <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 14px;">
+                  <strong style="color: #a5b4fc; display: block; margin-bottom: 6px; font-size: 0.9rem;">⚡ 10초 완성 초간단 단축어 (아이폰 / iPad)</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    복잡한 POST·헤더·JSON 설정 없이 <strong>동작 딱 1개</strong>로 작동합니다. 사파리·크롬·네이버 앱 어디서든 웹페이지나 드래그한 텍스트(Base64 코드, 추출코드 포함 링크 등)를 <strong>[공유] ➔ [단축어]</strong>로 보내면 PC에서 즉시 다운로드됩니다.
+                  </p>
+                  <ol style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 12px;">
+                    <li>아이폰 기본 <strong>[단축어]</strong> 앱 실행 ➔ 우측 상단 <strong><code>+</code></strong> 눌러 새 단축어 생성</li>
+                    <li>하단 중앙 <strong><code>(i)</code> 정보</strong> 아이콘 ➔ <strong>[공유 시트에서 보기]</strong> 스위치 켜기 ➔ <strong>[완료]</strong></li>
+                    <li>상단 입력 조건이 나타나면 <strong>'텍스트 및 기타 18개'</strong>(기본값: 모든 입력 또는 URL/텍스트) 그대로 유지</li>
+                    <li><strong>[동작 추가]</strong> 검색창에 <strong><code>URL의 콘텐츠 가져오기</code></strong> 검색 후 추가 (GET 기본값 그대로 유지)</li>
+                    <li>동작의 파란색 <strong>'URL'</strong> 자리를 터치하고 아래 주소를 복사해서 붙여넣기:</li>
+                  </ol>
+
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="shortcutUrlPreview" readonly class="form-input" style="font-size: 0.8rem; background: rgba(0,0,0,0.4); color: #86efac; font-family: monospace;">
+                    <button type="button" class="btn btn-primary" id="copyShortcutUrlBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 주소 복사</button>
+                  </div>
+                  <div style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; margin-top: 8px; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 6px;">
+                    💡 <strong>중요 포인트:</strong> 붙여넣은 주소 맨 끝의 <code>[단축어 입력]</code> 글자는 지우고, 아이폰 키보드 바로 위 변수 바에서 파란색 <strong>[단축어 입력]</strong> 알약을 터치해 끼워 넣으세요.
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. 안드로이드 전용 탭 -->
+              <div class="iphone-tab-pane" id="iphoneTabAndroid" style="display: none;">
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 12px;">
+                  <strong style="color: #6ee7b7; display: block; margin-bottom: 6px; font-size: 0.9rem;">⭐ 방법 A. 삼성 인터넷 / 크롬 북마클릿 (별도 앱 설치 없음!)</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    앱 설치 없이 브라우저 즐겨찾기(북마크)에 등록해두면, 웹페이지나 드래그 선택한 텍스트(Base64/링크)에서 <strong>[★ 북마크] 터치 한 번</strong>으로 집 PC에 전송하고 1초 만에 원래 화면으로 돌아옵니다.
+                  </p>
+                  <ol style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 12px;">
+                    <li><strong>삼성 인터넷</strong>: 아무 페이지나 [★ 북마크 추가] ➔ 북마크 목록에서 [편집] ➔ 이름: <code>PC로 전송</code>, URL: 아래 코드로 교체 후 저장</li>
+                    <li><strong>모바일 크롬</strong>: 아무 페이지나 [★ 북마크 추가] ➔ 북마크 [수정] ➔ 이름: <code>PC로 전송</code>, URL: 아래 코드로 교체 후 저장</li>
+                    <li><strong>사용법</strong>: 다운로드할 글에서 북마크를 터치(크롬은 주소창에 <code>PC로 전송</code> 입력 후 나오는 ★북마크 항목 터치)하면 즉시 전송됩니다!</li>
+                  </ol>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="androidBookmarkletPreview" readonly class="form-input" style="font-size: 0.78rem; background: rgba(0,0,0,0.4); color: #fde68a; font-family: monospace;">
+                    <button type="button" class="btn btn-primary" id="copyAndroidBookmarkletBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 코드 복사</button>
+                  </div>
+                </div>
+
+                <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.25); border-radius: var(--radius-sm); padding: 14px;">
+                  <strong style="color: #a5b4fc; display: block; margin-bottom: 6px; font-size: 0.9rem;">⚡ 방법 B. 안드로이드 [공유] 메뉴 연동 (HTTP Shortcuts 무료 오픈소스 앱)</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    아이폰 단축어처럼 어떤 앱(크롬·삼성인터넷·네이버 카페·디시 등)에서든 링크나 Base64 텍스트를 선택해 <strong>[공유] ➔ [PC로 다운로드]</strong> 터치 한 번으로 백그라운드 전송할 수 있습니다.
+                  </p>
+                  <ol style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 12px;">
+                    <li>플레이스토어에서 <strong>'HTTP Shortcuts'</strong> (무료·오픈소스·광고 없음) 설치 및 실행</li>
+                    <li>우측 하단 <strong><code>+</code></strong> 버튼 ➔ <strong>'Standard Shortcut (일반 바로가기)'</strong> 선택</li>
+                    <li>Shortcut Name(이름): <code>PC로 다운로드</code> 입력</li>
+                    <li><strong>Basic Request Settings ➔ URL</strong> 칸에 아래 주소를 복사해 붙여넣기 (Method: GET 기본값 유지):</li>
+                  </ol>
+                  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+                    <input type="text" id="androidShortcutUrlPreview" readonly class="form-input" style="font-size: 0.8rem; background: rgba(0,0,0,0.4); color: #86efac; font-family: monospace;">
+                    <button type="button" class="btn btn-primary" id="copyAndroidShortcutBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 주소 복사</button>
+                  </div>
+                  <ol start="5" style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 4px;">
+                    <li>뒤로 나와서 <strong>Trigger / Miscellaneous (또는 고급 설정) ➔ [Share into shortcut (공유 메뉴에 표시)]</strong> 체크 (공유된 텍스트가 <code>{text}</code> 자리에 자동 입력됨)</li>
+                    <li>우측 상단 <strong>체크(✔)</strong> 아이콘을 눌러 저장하면 완료!</li>
+                  </ol>
+                </div>
+              </div>
+
+              <!-- 3. 북마클릿 (통합) 탭 -->
+              <div class="iphone-tab-pane" id="iphoneTabBookmarklet" style="display: none;">
+                <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: var(--radius-sm); padding: 14px;">
+                  <strong style="color: #fcd34d; display: block; margin-bottom: 6px; font-size: 0.9rem;">🔖 모바일 브라우저 만능 북마클릿 (드래그 선택 & 현재 페이지 자동 인식)</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    아이폰 사파리, 안드로이드 삼성 인터넷·크롬 모두에서 작동하는 <strong>스마트 북마클릿</strong>입니다.<br>
+                    • <strong>본문 텍스트(Base64 코드, 링크+추출코드)를 드래그 선택한 상태</strong>에서 누르면 ➔ 선택된 텍스트를 자동 해독해 전송!<br>
+                    • <strong>아무것도 선택하지 않은 상태</strong>에서 누르면 ➔ 현재 보고 있는 페이지 주소를 전송 후 1초 만에 원래 페이지로 복귀!
+                  </p>
+                  <ol style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 12px;">
+                    <li>모바일 브라우저에서 아무 페이지나 <strong>책갈피(즐겨찾기) 추가</strong> (이름: <code>PC 다운로드</code>)</li>
+                    <li>책갈피 목록 ➔ <strong>[편집/수정]</strong> ➔ 방금 만든 <code>PC 다운로드</code> 책갈피 선택</li>
+                    <li>기존 URL(주소)을 지우고 아래 자바스크립트 코드를 붙여넣어 저장:</li>
+                  </ol>
+
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="bookmarkletCodePreview" readonly class="form-input" style="font-size: 0.78rem; background: rgba(0,0,0,0.4); color: #fde68a; font-family: monospace;">
+                    <button type="button" class="btn btn-primary" id="copyBookmarkletBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 코드 복사</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. 홈 화면 웹앱 탭 -->
+              <div class="iphone-tab-pane" id="iphoneTabPwa" style="display: none;">
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 14px;">
+                  <strong style="color: #6ee7b7; display: block; margin-bottom: 6px; font-size: 0.9rem;">📲 "홈 화면에 추가" (독립 실행형 PWA 모바일 앱)</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    웹앱 매니페스트(PWA)가 내장되어 있어 스마트폰 홈 화면에 추가하면 상단 주소창이 없는 <strong>네이티브 전체 화면 앱</strong>으로 실행되며, 실시간 속도 확인·일시정지·.torrent 파일 업로드를 편리하게 제어할 수 있습니다.
+                  </p>
+                  <ol style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px;">
+                    <li>스마트폰 브라우저에서 <strong>현재 서버 주소</strong>(<code id="pwaServerUrl">http://...</code>)로 접속 후 로그인합니다.</li>
+                    <li><strong>아이폰 (사파리)</strong>: 하단 중앙 <strong>[공유 버튼(네모+화살표)]</strong> ➔ 아래로 스크롤하여 <strong>[홈 화면에 추가]</strong> ➔ 우측 상단 <strong>[추가]</strong> 터치</li>
+                    <li><strong>안드로이드 (크롬 / 삼성 인터넷)</strong>: 우측 메뉴(<code>⋮</code> 또는 <code>≡</code>) ➔ <strong>[홈 화면에 추가]</strong> 또는 <strong>[앱 설치]</strong> 터치</li>
+                    <li>바탕화면에 생성된 <strong>원격 다운로더</strong> 앱 아이콘으로 언제든 원터치 접속하세요!</li>
+                  </ol>
+                </div>
+              </div>
+
+              <!-- 5. 외부/LTE 접속 팁 -->
+              <div class="iphone-tab-pane" id="iphoneTabExternal" style="display: none;">
+                <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-sm); padding: 14px;">
+                  <strong style="color: #93c5fd; display: block; margin-bottom: 6px; font-size: 0.9rem;">🌐 집 밖(LTE / 5G / 외부 Wi-Fi)에서 집 PC로 다운로드 보내기</strong>
+                  <p style="font-size: 0.82rem; color: var(--text-main); line-height: 1.55; margin-bottom: 10px;">
+                    외출 중에도 스마트폰에서 집 PC로 다운로드를 걸어두려면 아래 두 가지 방법 중 하나를 설정하세요:
+                  </p>
+                  <ul style="font-size: 0.82rem; color: var(--text-main); line-height: 1.7; padding-left: 20px; margin-bottom: 10px;">
+                    <li><strong>방법 A. Tailscale 무료 VPN (포트포워딩 불필요 · 가장 안전/간편)</strong>:
+                      집 PC와 스마트폰에 각각 무료 <strong>Tailscale</strong> 앱을 설치하고 같은 계정으로 로그인하면 PC 전용 고정 IP(예: <code>100.x.x.x</code>)가 부여됩니다. 외부에서 <code>http://100.x.x.x:7971</code>로 접속하면 집 Wi-Fi와 100% 동일하게 작동합니다.
+                    </li>
+                    <li><strong>방법 B. 공유기 포트포워딩 & DDNS</strong>:
+                      공유기 설정(예: ipTIME <code>192.168.0.1</code>)에서 외부 포트(예: <code>7971</code>)를 서버 PC의 내부 IP·포트로 포트포워딩하고 DDNS 주소(예: <code>http://myhome.iptime.org:7971</code>)로 접속합니다.
+                    </li>
+                  </ul>
+                  <div style="font-size: 0.76rem; color: #93c5fd; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 6px; line-height: 1.5;">
+                    💡 <strong>자동 주소 맞춤 팁:</strong> 외부 주소(Tailscale IP 또는 DDNS 주소)로 이 웹 대시보드에 접속한 상태에서 <strong>[📱 스마트폰 가이드]</strong> 탭을 열면, 단축어와 북마클릿 복사 주소도 해당 외부 주소로 자동 변환되어 생성됩니다!
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. 지원 플랫폼 안내 탭 -->
+          <div class="settings-tab-pane" id="settingsTabPlatforms">
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div style="margin-bottom: 16px;">
+                <strong style="color: #93c5fd; display: block; margin-bottom: 8px; font-size: 0.86rem;">☁️ 해외 클라우드 & 파일 호스팅:</strong>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <span class="badge badge-terabox" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3);">TeraBox (1024terabox)</span>
+                  <span class="badge badge-gdrive" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);">Google Drive</span>
+                  <span class="badge badge-gofile">GoFile</span>
+                  <span class="badge badge-onefichier" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">1fichier</span>
+                  <span class="badge badge-gigafile" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3);">GigaFile</span>
+                  <span class="badge badge-transferit" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">Transfer.it</span>
+                  <span class="badge badge-mega" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">MEGA (mega.nz)</span>
+                  <span class="badge badge-viking">VikingFile</span>
+                  <span class="badge badge-megaup">MegaUp</span>
+                  <span class="badge badge-kio" style="background: rgba(20, 184, 166, 0.15); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.3);">kio.ac</span>
+                  <span class="badge badge-xshare" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">X-Share (x-share.net)</span>
+                  <span class="badge badge-romsfun" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3);">Romsfun (romsfun.com)</span>
+                  <span class="badge badge-rootz" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Rootz (rootz.so)</span>
+                </div>
+              </div>
+
+              <div style="margin-bottom: 16px;">
+                <strong style="color: #86efac; display: block; margin-bottom: 8px; font-size: 0.86rem;">📝 국내 포털 & 블로그:</strong>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <span class="badge badge-mybox">Naver MYBOX (mybox.naver.com)</span>
+                  <span class="badge badge-naver">Naver Cafe (네이버 카페 첨부파일)</span>
+                  <span class="badge badge-tistory">Tistory (티스토리 첨부파일)</span>
+                </div>
+              </div>
+
+              <div>
+                <strong style="color: #c084fc; display: block; margin-bottom: 8px; font-size: 0.86rem;">⚡ 특수 기능 & 스마트 연동:</strong>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <span class="badge badge-torrent" style="background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.3);">🧲 BitTorrent & Magnet (토렌트 / 마그넷 링크)</span>
+                  <span class="badge badge-direct">Direct Link (일반 웹 다운로드)</span>
+                  <span class="badge badge-b64" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.3);">Base64 자동 디코딩</span>
+                  <span class="badge" data-goto-settings-tab="mobile" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); cursor: pointer;" title="스마트폰 설정 가이드 탭으로 이동">📱 스마트폰 연동 (iOS 단축어 / Android / 북마클릿)</span>
+                  <span class="badge" data-goto-settings-tab="extension" style="background: rgba(234, 179, 8, 0.15); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.3); cursor: pointer;" title="크롬 확장 프로그램 가이드 탭으로 이동">🧩 크롬 확장 프로그램 (우클릭 전송)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-actions" style="margin-top: 20px;">
+            <button type="button" class="btn btn-secondary" id="cancelSettingsBtn">닫기</button>
+            <button type="submit" class="btn btn-primary">💾 설정 저장</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 컨테이너 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.34') }}"></script>
+</body>
+</html>
