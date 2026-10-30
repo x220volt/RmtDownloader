@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSSE();
   initTabs();
   initEvents();
+  checkAppUpdate();
 });
 
 async function initAddons() {
@@ -764,6 +765,19 @@ function recalcSpeedAndActive() {
 // 4. 이벤트 바인딩 및 API 통신
 // ==========================================
 function initEvents() {
+  const appUpdateBtn = document.getElementById('appUpdateBtn');
+  if (appUpdateBtn) {
+    appUpdateBtn.addEventListener('click', applyAppUpdate);
+  }
+  const modalCheckAppUpdateBtn = document.getElementById('modalCheckAppUpdateBtn');
+  if (modalCheckAppUpdateBtn) {
+    modalCheckAppUpdateBtn.addEventListener('click', () => checkAppUpdate(true));
+  }
+  const modalApplyAppUpdateBtn = document.getElementById('modalApplyAppUpdateBtn');
+  if (modalApplyAppUpdateBtn) {
+    modalApplyAppUpdateBtn.addEventListener('click', applyAppUpdate);
+  }
+
   // 페이지당 표시 개수 선택기
   if (pageSizeSelect) {
     pageSizeSelect.addEventListener('change', (e) => {
@@ -1871,4 +1885,202 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+
+// ==========================================
+// 본 프로그램(Remote Downloader) GitHub 릴리즈 업데이트 관리
+// ==========================================
+let latestAppUpdateInfo = null;
+
+async function checkAppUpdate(force = false) {
+  const appUpdateBanner = document.getElementById('appUpdateBanner');
+  const appUpdateTitle = document.getElementById('appUpdateTitle');
+  const appUpdateSub = document.getElementById('appUpdateSub');
+  const appUpdateNotesLink = document.getElementById('appUpdateNotesLink');
+  const modalCurrentAppVer = document.getElementById('modalCurrentAppVer');
+  const modalLatestAppVer = document.getElementById('modalLatestAppVer');
+  const modalApplyAppUpdateBtn = document.getElementById('modalApplyAppUpdateBtn');
+  const appVersionStatusBadge = document.getElementById('appVersionStatusBadge');
+  const modalCheckAppUpdateBtn = document.getElementById('modalCheckAppUpdateBtn');
+
+  if (force && modalCheckAppUpdateBtn) {
+    modalCheckAppUpdateBtn.disabled = true;
+    modalCheckAppUpdateBtn.textContent = '🔄 확인 중...';
+  }
+
+  try {
+    const res = await fetch(`/api/app/update/check?force=${force ? 'true' : 'false'}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.error || '버전 확인 실패');
+
+    latestAppUpdateInfo = data;
+
+    if (modalCurrentAppVer) modalCurrentAppVer.textContent = data.current_version;
+    if (modalLatestAppVer) modalLatestAppVer.textContent = data.latest_version || '-';
+
+    if (data.has_update) {
+      // 신규 버전 존재
+      if (appUpdateBanner) {
+        if (appUpdateTitle) {
+          appUpdateTitle.textContent = `Remote Downloader 새 버전(${data.latest_version})이 출시되었습니다!`;
+        }
+        if (appUpdateSub) {
+          appUpdateSub.textContent = `현재 버전: ${data.current_version} · 최신 실행 파일로 즉시 업데이트할 수 있습니다.`;
+        }
+        if (appUpdateNotesLink && data.release_url) {
+          appUpdateNotesLink.href = data.release_url;
+        }
+        appUpdateBanner.classList.remove('hidden');
+      }
+
+      if (appVersionStatusBadge) {
+        appVersionStatusBadge.textContent = '⚡ 새 버전 업데이트 가능';
+        appVersionStatusBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+        appVersionStatusBadge.style.color = '#34d399';
+      }
+      if (modalApplyAppUpdateBtn) {
+        modalApplyAppUpdateBtn.classList.remove('hidden');
+      }
+
+      if (force) {
+        showToast(`새로운 ${data.latest_version} 버전이 있습니다. 원클릭 업데이트를 진행할 수 있습니다.`, 'info');
+      }
+    } else {
+      // 최신 버전 사용 중
+      if (appUpdateBanner) {
+        appUpdateBanner.classList.add('hidden');
+      }
+      if (appVersionStatusBadge) {
+        appVersionStatusBadge.textContent = '✅ 최신 버전 사용 중';
+        appVersionStatusBadge.style.background = 'rgba(59, 130, 246, 0.15)';
+        appVersionStatusBadge.style.color = '#60a5fa';
+      }
+      if (modalApplyAppUpdateBtn) {
+        modalApplyAppUpdateBtn.classList.add('hidden');
+      }
+
+      if (force) {
+        showToast('이미 최신 버전의 Remote Downloader를 사용하고 있습니다.', 'success');
+      }
+    }
+  } catch (err) {
+    console.debug('프로그램 업데이트 확인 건너뜀/오류:', err);
+    if (force) {
+      showToast('GitHub 최신 버전 확인에 실패했습니다. 네트워크 상태를 확인하세요.', 'error');
+    }
+  } finally {
+    if (modalCheckAppUpdateBtn) {
+      modalCheckAppUpdateBtn.disabled = false;
+      modalCheckAppUpdateBtn.textContent = '🔄 업데이트 확인';
+    }
+  }
+}
+
+async function applyAppUpdate() {
+  const targetTag = latestAppUpdateInfo?.latest_version || '새 버전';
+  const isFrozen = latestAppUpdateInfo?.is_frozen ?? true;
+
+  const msg = isFrozen
+    ? `Remote Downloader를 ${targetTag} 버전으로 업데이트하시겠습니까?
+
+- 최신 실행 파일(RemoteDownloader.exe)을 다운로드한 후
+- 기존 프로그램을 안전하게 교체하고 자동 재시작합니다.`
+    : `Remote Downloader를 ${targetTag} 버전으로 업데이트하시겠습니까?
+
+- Git pull을 통해 최신 소스코드를 즉시 동기화합니다.`;
+
+  if (!confirm(msg)) {
+    return;
+  }
+
+  const appUpdateBtn = document.getElementById('appUpdateBtn');
+  const modalApplyAppUpdateBtn = document.getElementById('modalApplyAppUpdateBtn');
+
+  [appUpdateBtn, modalApplyAppUpdateBtn].forEach((btn) => {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 다운로드 및 업데이트 중...</span>';
+    }
+  });
+
+  showToast('최신 실행 파일을 안전하게 다운로드 중입니다. 잠시만 기다려 주세요...', 'info');
+
+  try {
+    const res = await fetch('/api/app/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tag: targetTag }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status === 'ok') {
+      showToast(data.message || '업데이트 성공! 프로그램을 재시작합니다.', 'success');
+
+      // 재시작 카운트다운 안내 모달 오버레이 노출
+      showRestartOverlay(targetTag);
+    } else {
+      const errMsg = data.error || (res.status === 401 ? '로그인이 필요한 작업입니다.' : '업데이트 실패');
+      showToast(`업데이트 실패: ${errMsg}`, 'error');
+      [appUpdateBtn, modalApplyAppUpdateBtn].forEach((btn) => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '⚡ 지금 업데이트';
+        }
+      });
+    }
+  } catch (err) {
+    console.error('업데이트 요청 오류:', err);
+    showToast(`업데이트 요청 중 오류가 발생했습니다: ${err.message}`, 'error');
+    [appUpdateBtn, modalApplyAppUpdateBtn].forEach((btn) => {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '⚡ 지금 업데이트';
+      }
+    });
+  }
+}
+
+function showRestartOverlay(targetTag) {
+  let overlay = document.getElementById('appRestartOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'appRestartOverlay';
+    overlay.style.cssText = `
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(10, 14, 23, 0.92); backdrop-filter: blur(8px);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 999999; color: #fff; text-align: center; padding: 20px;
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  let count = 5;
+  const updateOverlayText = () => {
+    overlay.innerHTML = `
+      <div style="background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 16px; padding: 36px 42px; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        <div style="font-size: 2.8rem; margin-bottom: 14px;">🚀</div>
+        <h3 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 8px; color: #f8fafc;">Remote Downloader 업데이트 완료</h3>
+        <p style="font-size: 0.92rem; color: #94a3b8; margin-bottom: 20px; line-height: 1.6;">
+          <strong>${escapeHtml(targetTag)}</strong> 버전으로 파일 교체 및 재시작이 진행 중입니다.<br>
+          <span style="color: #60a5fa; font-weight: 600;">${count}초</span> 후 자동으로 페이지를 새로고침합니다.
+        </p>
+        <div style="display: flex; justify-content: center;">
+          <div class="status-dot pulse" style="width: 12px; height: 12px; background: #34d399;"></div>
+        </div>
+      </div>
+    `;
+  };
+
+  updateOverlayText();
+  const timer = setInterval(() => {
+    count--;
+    if (count <= 0) {
+      clearInterval(timer);
+      window.location.reload();
+    } else {
+      updateOverlayText();
+    }
+  }, 1000);
 }

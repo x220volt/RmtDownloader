@@ -263,5 +263,54 @@ class ExtensionUpdateSecurityTests(unittest.TestCase):
             self.assertTrue(os.path.exists(os.path.join(target_dir, "popup.js")))
 
 
+class AppUpdateSecurityTests(unittest.TestCase):
+    def test_is_newer_version(self):
+        from app import is_newer_version
+
+        self.assertTrue(is_newer_version("v0.1.34", "v0.1.35"))
+        self.assertTrue(is_newer_version("0.1.34", "v0.1.35"))
+        self.assertTrue(is_newer_version("v0.1.34", "0.2.0"))
+        self.assertTrue(is_newer_version("v0.1.34", "v1.0.0"))
+        self.assertFalse(is_newer_version("v0.1.34", "v0.1.34"))
+        self.assertFalse(is_newer_version("v0.1.35", "v0.1.34"))
+        self.assertFalse(is_newer_version("v0.1.34", ""))
+        self.assertFalse(is_newer_version("v0.1.34", None))
+
+    def test_app_update_requires_auth(self):
+        from app import app
+
+        client = app.test_client()
+        resp = client.post("/api/app/update", json={})
+        self.assertIn(resp.status_code, (401, 302))
+
+    def test_app_update_check_api(self):
+        from app import app
+        from unittest.mock import patch, MagicMock
+
+        client = app.test_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "tag_name": "v0.1.35",
+            "body": "테스트 릴리즈 노트",
+            "html_url": "https://github.com/x220volt/RmtDownloader/releases/tag/v0.1.35",
+            "assets": [
+                {
+                    "name": "RemoteDownloader.exe",
+                    "browser_download_url": "https://github.com/x220volt/RmtDownloader/releases/download/v0.1.35/RemoteDownloader.exe",
+                }
+            ],
+        }
+
+        with patch("requests.get", return_value=mock_resp):
+            resp = client.get("/api/app/update/check?force=true")
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertEqual(data["status"], "ok")
+            self.assertEqual(data["latest_version"], "v0.1.35")
+            self.assertTrue(data["has_update"])
+            self.assertTrue(data["has_exe_asset"])
+
+
 if __name__ == "__main__":
     unittest.main()

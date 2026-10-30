@@ -909,6 +909,311 @@ def update_extension():
     )
 
 
+_app_release_cache = {"time": 0.0, "data": None}
+APP_RELEASE_CACHE_TTL = 600.0  # 10분 캐시
+
+
+def is_newer_version(current_ver: str, target_ver: str) -> bool:
+    """SemVer 버전 비교 (예: 'v0.1.34' vs 'v0.1.35'). target_ver가 더 크면 True."""
+    if not target_ver:
+        return False
+    c_clean = re.sub(r"^[vV]", "", str(current_ver).strip())
+    t_clean = re.sub(r"^[vV]", "", str(target_ver).strip())
+    if not t_clean or c_clean == t_clean:
+        return False
+
+    def parse_parts(v_str: str) -> list:
+        parts = []
+        for p in v_str.split("."):
+            m = re.match(r"^(\d+)", p)
+            parts.append(int(m.group(1)) if m else 0)
+        return parts
+
+    c_parts = parse_parts(c_clean)
+    t_parts = parse_parts(t_clean)
+    max_len = max(len(c_parts), len(t_parts))
+    c_parts += [0] * (max_len - len(c_parts))
+    t_parts += [0] * (max_len - len(t_parts))
+    return t_parts > c_parts
+
+
+@app.route("/api/app/update/check", methods=["GET"])
+def check_app_update():
+    """GitHub 최신 릴리즈 정보를 조회하여 본 프로그램의 신규 버전 여부를 반환합니다."""
+    import requests
+
+    force = request.args.get("force", "false").lower() in ("true", "1", "yes")
+    now = time.time()
+
+    rel_info = None
+    if not force and _app_release_cache["data"] and (now - _app_release_cache["time"] < APP_RELEASE_CACHE_TTL):
+        rel_info = _app_release_cache["data"]
+    else:
+        release_api = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+        headers = {"User-Agent": "RemoteDownloader-Updater"}
+        try:
+            resp = requests.get(release_api, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                rel_info = resp.json()
+                _app_release_cache["time"] = now
+                _app_release_cache["data"] = rel_info
+            else:
+                return (
+                    jsonify(
+                        {
+                            "status": "error",
+                            "error": f"GitHub API 응답 오류 ({resp.status_code})",
+                        }
+                    ),
+                    502,
+                )
+        except Exception as e:
+            return jsonify({"status": "error", "error": f"GitHub 통신 실패: {e}"}), 502
+
+    if not rel_info:
+        return jsonify({"status": "error", "error": "릴리즈 정보를 가져올 수 없습니다."}), 502
+
+    latest_tag = rel_info.get("tag_name", "")
+    has_update = is_newer_version(APP_VERSION_TAG, latest_tag)
+    assets = rel_info.get("assets", [])
+    exe_asset = next((a for a in assets if a.get("name") == "RemoteDownloader.exe"), None)
+
+    is_frozen = getattr(sys, "frozen", False)
+    current_exe = str(Path(sys.executable).resolve())
+
+    return jsonify(
+        {
+            "status": "ok",
+            "current_version": APP_VERSION_TAG,
+            "latest_version": latest_tag,
+            "has_update": has_update,
+            "release_notes": rel_info.get("body", ""),
+            "release_url": rel_info.get("html_url", ""),
+            "published_at": rel_info.get("published_at", ""),
+            "is_frozen": is_frozen,
+            "executable_path": current_exe,
+            "has_exe_asset": exe_asset is not None,
+        }
+    )
+
+
+@app.route("/api/app/update", methods=["POST"])
+@login_required
+def update_app():
+    """GitHub 공식 릴리즈에서 최신 RemoteDownloader.exe를 다운로드받아 안전하게 자가 업데이트 및 재시작합니다."""
+    import threading
+    from urllib.parse import urlparse
+
+    import requests
+
+    data = request.get_json(silent=True) or {}
+    tag_name = (data.get("tag") or data.get("tag_name") or "").strip()
+
+    is_frozen = getattr(sys, "frozen", False)
+
+    # 1. 소스 코드 실행 환경 (git pull 지원)
+    if not is_frozen:
+        git_dir = Path(__file__).resolve().parent / ".git"
+        if git_dir.exists():
+            try:
+                proc = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    cwd=str(git_dir.parent),
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if proc.returncode == 0:
+                    logger.info("개발 소스 환경에서 git pull을 통한 업데이트 완료")
+                    return jsonify(
+                        {
+                            "status": "ok",
+                            "is_frozen": False,
+                            "mode": "git",
+                            "message": "Git pull을 통해 최신 소스코드가 반영되었습니다. 프로그램을 재시작해 주세요.",
+                            "output": proc.stdout.strip(),
+                        }
+                    )
+                else:
+                    return (
+                        jsonify(
+                            {
+                                "status": "error",
+                                "is_frozen": False,
+                                "mode": "git",
+                                "error": f"Git pull 실패: {proc.stderr.strip() or proc.stdout.strip()}",
+                            }
+                        ),
+                        500,
+                    )
+            except Exception as e:
+                return (
+                    jsonify(
+                        {
+                            "status": "error",
+                            "is_frozen": False,
+                            "mode": "git",
+                            "error": f"Git 업데이트 중 예외 발생: {e}",
+                        }
+                    ),
+                    500,
+                )
+
+    # 2. 바이너리 실행 환경: 릴리즈 에셋에서 RemoteDownloader.exe 다운로드
+    release_api = (
+        f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/tags/{tag_name}"
+        if tag_name
+        else f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/releases/latest"
+    )
+
+    headers = {"User-Agent": "RemoteDownloader-Updater"}
+    try:
+        resp = requests.get(release_api, headers=headers, timeout=12)
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"GitHub API 접속 실패: {e}"}), 502
+
+    if resp.status_code != 200:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": f"GitHub 릴리즈 정보를 가져오지 못했습니다. ({resp.status_code})",
+                }
+            ),
+            400,
+        )
+
+    rel_info = resp.json()
+    resolved_tag = rel_info.get("tag_name", "latest")
+    assets = rel_info.get("assets", [])
+
+    exe_asset = next((a for a in assets if a.get("name") == "RemoteDownloader.exe"), None)
+    if not exe_asset or not exe_asset.get("browser_download_url"):
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "error": "릴리즈에 실행 파일(RemoteDownloader.exe) 애셋이 존재하지 않습니다.",
+                }
+            ),
+            404,
+        )
+
+    download_url = exe_asset["browser_download_url"]
+
+    # 보안 안전장치: HTTPS 및 GitHub 도메인 출처 검증
+    parsed_url = urlparse(download_url)
+    if not (
+        parsed_url.scheme == "https"
+        and (
+            parsed_url.hostname == "github.com"
+            or (parsed_url.hostname and parsed_url.hostname.endswith(".github.com"))
+        )
+    ):
+        return jsonify({"status": "error", "error": "신뢰할 수 없는 다운로드 출처입니다."}), 400
+
+    target_exe = Path(sys.executable).resolve()
+    temp_exe = target_exe.with_name(f"{target_exe.stem}_new{target_exe.suffix}")
+
+    try:
+        # 스트리밍 다운로드
+        with requests.get(download_url, headers=headers, stream=True, timeout=120) as r:
+            r.raise_for_status()
+            with open(temp_exe, "wb") as f:
+                for chunk in r.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        f.write(chunk)
+
+        # 바이너리 파일 유효성 검증
+        file_size = temp_exe.stat().st_size
+        if file_size < 1024 * 1024:  # 최소 1MB 이상이어야 유효한 실행 바이너리
+            if temp_exe.exists():
+                temp_exe.unlink()
+            return jsonify({"status": "error", "error": "다운로드된 실행 파일의 크기가 비정상적입니다."}), 502
+
+        # PE 헤더 'MZ' 매직 넘버 검증
+        with open(temp_exe, "rb") as f:
+            header = f.read(2)
+            if header != b"MZ":
+                if temp_exe.exists():
+                    temp_exe.unlink()
+                return jsonify({"status": "error", "error": "올바른 Windows 실행 파일(PE 포맷)이 아닙니다."}), 502
+
+    except Exception as e:
+        if temp_exe.exists():
+            try:
+                temp_exe.unlink()
+            except OSError:
+                pass
+        return jsonify({"status": "error", "error": f"새 버전 다운로드 중 오류 발생: {e}"}), 502
+
+    # 자가 교체 및 재시작용 배치 스크립트 작성
+    updater_bat = target_exe.with_name("updater.bat")
+    pid = os.getpid()
+
+    bat_content = f"""@echo off
+chcp 65001 >nul
+title Remote Downloader Auto-Updater
+echo [Remote Downloader] Updating to {resolved_tag}...
+echo Waiting for existing process (PID: {pid}) to exit...
+
+:: 프로세스 종료 대기 및 강제 종료
+timeout /t 2 /nobreak >nul
+taskkill /f /pid {pid} >nul 2>&1
+timeout /t 1 /nobreak >nul
+
+echo Overwriting executable...
+move /y "{temp_exe}" "{target_exe}" >nul 2>&1
+if errorlevel 1 (
+    echo Retrying file replacement...
+    timeout /t 2 /nobreak >nul
+    move /y "{temp_exe}" "{target_exe}" >nul 2>&1
+)
+
+echo Starting updated Remote Downloader ({resolved_tag})...
+start "" "{target_exe}"
+timeout /t 2 /nobreak >nul
+del "%~f0" >nul 2>&1
+"""
+
+    try:
+        updater_bat.write_text(bat_content, encoding="utf-8")
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"업데이터 스크립트 생성 실패: {e}"}), 500
+
+    # 배치 스크립트를 독립 프로세스로 백그라운드 구동
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    try:
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(updater_bat)],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"업데이터 프로세스 실행 실패: {e}"}), 500
+
+    logger.info(
+        f"본 프로그램({target_exe.name})이 {resolved_tag} 버전으로 업데이트 및 재시작됩니다."
+    )
+
+    # 1.5초 후 메인 프로세스 종료 예약
+    def _delayed_exit():
+        time.sleep(1.5)
+        os._exit(0)
+
+    threading.Thread(target=_delayed_exit, daemon=True).start()
+
+    return jsonify(
+        {
+            "status": "ok",
+            "is_frozen": True,
+            "message": f"성공적으로 {resolved_tag} 버전으로 업데이트되었습니다! 프로그램이 3초 후 자동으로 재시작됩니다.",
+            "version": resolved_tag,
+        }
+    )
+
+
 @app.route("/api/settings", methods=["GET"])
 @login_required
 def get_settings():

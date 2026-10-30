@@ -28,6 +28,15 @@
     4. 확장자 화이트리스트 검사(`.js`, `.html`, `.css`, `.json`, `.png` 등만 허용, `.exe`/`.bat`/`.dll` 차단)
   * 갱신 완료 즉시 `chrome.runtime.reload()`를 호출하여 브라우저 재시작 없이 즉각 새 버전 로드.
 
+### 🚀 본 프로그램 (Remote Downloader Core)
+* **GitHub 최신 릴리즈 기반 본 프로그램 원클릭 자가 업데이트(In-Place Self Updater) 탑재**:
+  * 웹 대시보드 접속 시 GitHub 공식 릴리즈를 백그라운드에서 자동 확인하여 상단 배너 및 설정창에 업데이트 안내.
+  * **실행 바이너리(`RemoteDownloader.exe`) 무중단 자가 교체**:
+    * 최신 바이너리를 스트리밍 다운로드 후 PE 매직넘버(`MZ`) 및 무결성 검증.
+    * Windows의 파일 락(Lock)을 우회하는 독립 업데이터 배치 스크립트(`updater.bat`)를 통해 기존 exe를 최신 exe로 교체 후 자동 재실행.
+    * 웹 UI에서 재시작 카운트다운 오버레이 노출 및 5초 후 자동 새로고침.
+  * 개발자 환경(Git 저장소)에서는 `git pull origin main`을 통해 최신 코드 자동 동기화 지원.
+
 ---
 
 ## [v0.1.33] - 2026-10-30
