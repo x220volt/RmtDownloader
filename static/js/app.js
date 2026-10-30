@@ -1904,6 +1904,12 @@ async function checkAppUpdate(force = false) {
   const appVersionStatusBadge = document.getElementById('appVersionStatusBadge');
   const modalCheckAppUpdateBtn = document.getElementById('modalCheckAppUpdateBtn');
 
+  // 기본적으로 배너는 항상 숨김 보장
+  if (appUpdateBanner) {
+    appUpdateBanner.style.display = 'none';
+    appUpdateBanner.classList.add('hidden');
+  }
+
   if (force && modalCheckAppUpdateBtn) {
     modalCheckAppUpdateBtn.disabled = true;
     modalCheckAppUpdateBtn.textContent = '🔄 확인 중...';
@@ -1921,7 +1927,7 @@ async function checkAppUpdate(force = false) {
     if (modalLatestAppVer) modalLatestAppVer.textContent = data.latest_version || '-';
 
     if (data.has_update) {
-      // 신규 버전 존재
+      // 신규 버전이 실제로 존재할 때만 배너 표시
       if (appUpdateBanner) {
         if (appUpdateTitle) {
           appUpdateTitle.textContent = `Remote Downloader 새 버전(${data.latest_version})이 출시되었습니다!`;
@@ -1932,6 +1938,7 @@ async function checkAppUpdate(force = false) {
         if (appUpdateNotesLink && data.release_url) {
           appUpdateNotesLink.href = data.release_url;
         }
+        appUpdateBanner.style.display = 'flex';
         appUpdateBanner.classList.remove('hidden');
       }
 
@@ -1941,6 +1948,7 @@ async function checkAppUpdate(force = false) {
         appVersionStatusBadge.style.color = '#34d399';
       }
       if (modalApplyAppUpdateBtn) {
+        modalApplyAppUpdateBtn.style.display = 'inline-flex';
         modalApplyAppUpdateBtn.classList.remove('hidden');
       }
 
@@ -1948,8 +1956,9 @@ async function checkAppUpdate(force = false) {
         showToast(`새로운 ${data.latest_version} 버전이 있습니다. 원클릭 업데이트를 진행할 수 있습니다.`, 'info');
       }
     } else {
-      // 최신 버전 사용 중
+      // 최신 버전 사용 중 -> 배너 숨김 확실히 유지
       if (appUpdateBanner) {
+        appUpdateBanner.style.display = 'none';
         appUpdateBanner.classList.add('hidden');
       }
       if (appVersionStatusBadge) {
@@ -1958,6 +1967,7 @@ async function checkAppUpdate(force = false) {
         appVersionStatusBadge.style.color = '#60a5fa';
       }
       if (modalApplyAppUpdateBtn) {
+        modalApplyAppUpdateBtn.style.display = 'none';
         modalApplyAppUpdateBtn.classList.add('hidden');
       }
 
@@ -1967,6 +1977,11 @@ async function checkAppUpdate(force = false) {
     }
   } catch (err) {
     console.debug('프로그램 업데이트 확인 건너뜀/오류:', err);
+    // 오류 발생 시에도 배너는 노출되지 않도록 강제 숨김
+    if (appUpdateBanner) {
+      appUpdateBanner.style.display = 'none';
+      appUpdateBanner.classList.add('hidden');
+    }
     if (force) {
       showToast('GitHub 최신 버전 확인에 실패했습니다. 네트워크 상태를 확인하세요.', 'error');
     }
