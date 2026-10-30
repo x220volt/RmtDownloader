@@ -1,7 +1,7 @@
 """MegaUp (megaup.net) 링크 리졸버.
 
 GitHub 도구 및 브라우저 우회 기법(DrissionPage / FlareSolverr)을 참조하여
-Cloudflare Turnstile 보호를 자동으로 우회하고 고속 직링크(megadl.boats)를 추출합니다.
+Cloudflare Turnstile 보호 및 광고 하이재킹을 자동으로 우회하고 고속 직링크(?download_token=...)를 추출합니다.
 """
 
 import logging
@@ -28,11 +28,24 @@ TIMEOUT = 30
 
 def _is_megaup_host(hostname: Optional[str]) -> bool:
     host = (hostname or "").lower().rstrip(".")
-    return host in (
-        "megaup.net",
-        "www.megaup.net",
-        "download.megaup.net",
-        "megadl.boats",
+    return (
+        host in ("megaup.net", "www.megaup.net", "download.megaup.net")
+        or host.endswith(".megaup.net")
+        or host == "megadl.boats"
+        or host.endswith(".megadl.boats")
+        or host.endswith("megaupdownup.org")
+    )
+
+
+def _is_direct_download_url(url: str) -> bool:
+    if not url:
+        return False
+    p = urlparse(url)
+    return (
+        "download_token=" in p.query
+        or p.hostname == "megadl.boats"
+        or (bool(p.hostname) and (p.hostname.endswith(".megaupdownup.org") or p.hostname.endswith(".megadl.boats")))
+        or (p.hostname in ("megadl.boats", "download.megaup.net") and p.path.startswith("/download/"))
     )
 
 
@@ -60,28 +73,79 @@ def _extract_final_url(html: str) -> Optional[str]:
         if not raw_href or not isinstance(raw_href, str):
             continue
         candidate = unescape(raw_href.strip())
-        p = urlparse(candidate)
-        if (
-            p.scheme == "https"
-            and p.hostname in ("megadl.boats", "download.megaup.net")
-            and ("download_token=" in p.query or p.path.startswith("/download/"))
-        ):
+        if _is_direct_download_url(candidate):
             return candidate
     return None
 
 
-def _resolve_via_drission(page_url: str, timeout: int = 35) -> str:
-    """DrissionPage 및 로컬 브라우저(Chrome/Edge)를 사용해 Cloudflare Turnstile을 자동 우회합니다.
+def _resolve_via_drission(page_url: str, timeout: int = 40) -> str:
+    """DrissionPage 및 로컬 브라우저(Chrome/Edge)를 사용해 Cloudflare Turnstile 및 광고를 우회하고
+    고속 직링크(?download_token=...)를 추출합니다.
 
     화면 밖(-2400, -2400) 가상 위치에서 무음 실행되므로 사용자 화면을 방해하지 않습니다.
     """
     with stealth_browser_session(
-        prefix="megaup_session_", window_size="500,400"
+        prefix="megaup_session_", window_size="1024,768", window_position="-2400,-2400"
     ) as page:
-        logger.info(f"[MegaUp] 로컬 브라우저로 접속 시작: {page_url}")
-        page.get(page_url)
+        # 0단계: 악성 광고 팝업 및 리다이렉트 스크립트 도메인 차단
+        try:
+            page.run_cdp("Network.enable")
+            page.run_cdp(
+                "Network.setBlockedURLs",
+                urls=[
+                    "*pcscango*",
+                    "*shortenoverleg*",
+                    "*geogenyveered*",
+                    "*pubadx*",
+                    "*a-ads*",
+                    "*theharityhild*",
+                ],
+            )
+        except Exception as e:
+            logger.debug(f"[MegaUp] CDP 광고 차단 설정 무시됨: {e}")
 
-        # 1단계: 다운로드 준비 카운트다운 타이머 버튼 대기 (최대 15초)
+        try:
+            page.run_js("window.open = function() { return null; };")
+        except Exception:
+            pass
+
+        # 네트워크 패킷 리스너 가동 (직링크 다운로드 패킷 실시간 감지)
+        try:
+            page.listen.start(["download_token", "megaupdownup", "megadl.boats"])
+        except Exception as e:
+            logger.debug(f"[MegaUp] page.listen 시작 실패: {e}")
+
+        parsed_input = urlparse(page_url)
+        main_page_url = page_url
+
+        if parsed_input.hostname == "download.megaup.net":
+            # 이미 download.megaup.net 토큰 URL로 입력된 경우
+            # 토큰 페이지에 접속하여 원본 메인 URL(https://megaup.net/{id})을 복원
+            logger.info(f"[MegaUp] 토큰 페이지에서 원본 메인 URL 복원 시도: {page_url[:60]}...")
+            page.get(page_url)
+            for _ in range(12):
+                time.sleep(1)
+                title = page.title or ""
+                if "Download Page" in title or ("megaup" in (page.url or "") and "잠시" not in title and "Just a moment" not in title):
+                    break
+            
+            m = re.search(r"https://megaup\.net/([a-zA-Z0-9]+)\?pt=", page.html)
+            if m:
+                main_page_url = f"https://megaup.net/{m.group(1)}"
+                logger.info(f"[MegaUp] 원본 메인 URL 복원 성공: {main_page_url}")
+            else:
+                for a in page.eles('css:a[href*="megaup.net"]'):
+                    href = a.attr("href") or ""
+                    p = urlparse(href)
+                    if p.hostname in ("megaup.net", "www.megaup.net") and p.path.strip("/") and not p.path.startswith(("/contact", "/terms", "/upgrade", "/faq", "/account")):
+                        main_page_url = href
+                        logger.info(f"[MegaUp] 토큰 페이지 링크에서 원본 메인 URL 감지: {main_page_url}")
+                        break
+
+        # 1단계: 메인 페이지에서 카운트다운 후 정식 토큰 링크 획득
+        logger.info(f"[MegaUp] 메인 페이지로 로컬 브라우저 접속: {main_page_url}")
+        page.get(main_page_url)
+
         target_href = None
         for _ in range(15):
             btn = page.ele(
@@ -93,11 +157,9 @@ def _resolve_via_drission(page_url: str, timeout: int = 35) -> str:
             time.sleep(1)
 
         if not target_href:
-            # 페이지 내 HTML 정규식 재확인
             target_href = _extract_token_url(page.html)
 
         if not target_href:
-            # 이미 직링크가 있는지 확인
             found_dl = _extract_final_url(page.html)
             if found_dl:
                 return found_dl
@@ -105,31 +167,98 @@ def _resolve_via_drission(page_url: str, timeout: int = 35) -> str:
                 "MegaUp 다운로드 토큰 버튼(download.megaup.net)을 찾을 수 없습니다."
             )
 
-        # 2단계: 광고 팝업 스크립트를 피하고 정상 Referer 유지를 위해 target_href로 직접 이동
         logger.info(f"[MegaUp] 토큰 페이지로 브라우저 이동: {target_href[:60]}...")
         page.get(target_href)
 
-        # 3단계: Cloudflare Turnstile 챌린지 통과 및 최종 직링크 추출 (최대 25초)
-        final_link = None
-        for step in range(25):
+        # 2단계: Cloudflare Turnstile 검증 대기
+        for _ in range(15):
             time.sleep(1)
-            dl_btn = page.ele('css:a[href*="megadl.boats"]', timeout=0.5)
-            if dl_btn:
-                href = dl_btn.attr("href")
-                if href and ("megadl.boats" in href or "download_token=" in href):
-                    final_link = href
+            title = page.title or ""
+            if (
+                "Download Page" in title
+                or ("megaup" in (page.url or "") and "잠시" not in title and "Just a moment" not in title)
+            ):
+                logger.info(f"[MegaUp] Cloudflare Turnstile 통과 확인 (제목: {title})")
+                break
+
+            # 혹시 Turnstile iframe이 유지되면 체크박스 클릭 보조 시도
+            try:
+                cf_iframe = page.ele('css:iframe[src*="cloudflare"], iframe[src*="turnstile"]', timeout=0.2)
+                if cf_iframe:
+                    cf_iframe.click.at(30, 32)
+            except Exception:
+                pass
+
+        # 3단계: 다운로드 페이지(#btndownload) 활성화 대기 및 클릭
+        logger.info("[MegaUp] 다운로드 버튼 활성화 대기 중...")
+        for _ in range(15):
+            time.sleep(1)
+
+            # 혹시 네트워크 패킷에 이미 직링크가 포착되었는지 확인
+            try:
+                pkt = page.listen.wait(timeout=0.1)
+                if pkt and getattr(pkt, "url", None) and _is_direct_download_url(pkt.url):
+                    logger.info(f"[MegaUp] 네트워크에서 직링크 캡처 성공: {pkt.url[:80]}...")
+                    return pkt.url
+            except Exception:
+                pass
+
+            btn = page.ele('css:#btndownload, button[id*="download"]', timeout=0.5)
+            if btn:
+                cls = btn.attr("class") or ""
+                txt = btn.text or ""
+                if "disabled" not in cls and ("DOWNLOAD" in txt.upper() or "NOW" in txt.upper() or not txt):
+                    logger.info("[MegaUp] 다운로드 버튼 준비 완료! 클릭 실행")
+                    try:
+                        page.run_js("document.getElementById('btndownload').click();")
+                    except Exception:
+                        try:
+                            btn.click()
+                        except Exception:
+                            pass
                     break
-            # 페이지 내 HTML에서도 확인
-            final_link = _extract_final_url(page.html)
+
+        # 4단계: 직링크 획득 (패킷 캡처 대기, 열린 탭, 또는 페이지 링크)
+        try:
+            res_pkt = page.listen.wait(timeout=10)
+            if res_pkt and getattr(res_pkt, "url", None) and _is_direct_download_url(res_pkt.url):
+                logger.info(f"[MegaUp] 우회 성공! 직링크 캡처: {res_pkt.url[:80]}...")
+                return res_pkt.url
+        except Exception as e:
+            logger.debug(f"[MegaUp] listen.wait 예외: {e}")
+
+        final_link = None
+        for _ in range(5):
+            time.sleep(1)
+
+            # 브라우저 주소창 또는 열린 탭 확인
+            try:
+                for tid in page.tab_ids:
+                    tab = page.get_tab(tid)
+                    if _is_direct_download_url(tab.url):
+                        final_link = tab.url
+                        break
+            except Exception:
+                pass
+
             if final_link:
                 break
+
+            # 페이지 내 링크 확인
+            try:
+                found = _extract_final_url(page.html)
+                if found:
+                    final_link = found
+                    break
+            except Exception:
+                pass
 
         if not final_link:
             raise ValueError(
                 "Cloudflare Turnstile 검증 시간 초과 또는 최종 다운로드 직링크 추출 실패"
             )
 
-        logger.info(f"[MegaUp] Cloudflare 우회 성공! 직링크 획득: {final_link[:80]}...")
+        logger.info(f"[MegaUp] Cloudflare 우회 성공! 최종 직링크 획득: {final_link[:80]}...")
         return final_link
 
 
@@ -157,7 +286,7 @@ def _resolve_via_flaresolverr(
                 return final
             raise ValueError("FlareSolverr: MegaUp 토큰 링크를 찾을 수 없습니다.")
 
-    # 2. token_url 해석하여 megadl.boats 링크 획득
+    # 2. token_url 해석하여 직링크 획득
     payload = {
         "cmd": "request.get",
         "url": token_url,
@@ -169,7 +298,7 @@ def _resolve_via_flaresolverr(
     html = data.get("solution", {}).get("response", "")
     final_url = _extract_final_url(html)
     if not final_url:
-        raise ValueError("FlareSolverr: 최종 megadl.boats 링크 추출에 실패했습니다.")
+        raise ValueError("FlareSolverr: 최종 직링크 추출에 실패했습니다.")
     return final_url
 
 
@@ -188,9 +317,8 @@ class MegaUpResolver(BaseResolver):
         page_url = url.strip()
         opts = options or {}
 
-        # 0. 이미 megadl.boats 직링크인 경우 즉시 반환
-        parsed = urlparse(page_url)
-        if parsed.hostname == "megadl.boats" or "download_token=" in parsed.query:
+        # 0. 이미 직링크(?download_token=...)인 경우 즉시 반환
+        if _is_direct_download_url(page_url):
             return {
                 "url": page_url,
                 "filename": "",
@@ -295,7 +423,7 @@ class MegaUpResolver(BaseResolver):
                     msg += f"자동 브라우저 우회 오류: {drission_error}\n"
                 msg += (
                     "- PC에 Chrome 또는 Edge 브라우저가 정상 설치되어 있는지 확인해 주세요.\n"
-                    "- 또는 브라우저에서 'DOWNLOAD NOW' 버튼을 누른 후 생성되는 최종 직링크(https://megadl.boats/download/...) 주소를 직접 붙여넣으셔도 바로 다운로드됩니다."
+                    "- 또는 브라우저에서 다운로드 시작 후 생성되는 최종 직링크 주소를 직접 붙여넣으셔도 바로 다운로드됩니다."
                 )
                 raise ValueError(msg)
 
