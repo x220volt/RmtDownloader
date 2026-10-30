@@ -1157,22 +1157,29 @@ title Remote Downloader Auto-Updater
 echo [Remote Downloader] Updating to {resolved_tag}...
 echo Waiting for existing process (PID: {pid}) to exit...
 
-:: 프로세스 종료 대기 및 강제 종료
-timeout /t 2 /nobreak >nul
+:: 1. 기존 프로세스 종료
 taskkill /f /pid {pid} >nul 2>&1
-timeout /t 1 /nobreak >nul
 
-echo Overwriting executable...
+:: 2. 파일 락 해제 대기 및 교체 재시도 루프 (최대 30초, ping 딜레이 사용 - timeout 명령은 백그라운드 프로세스에서 실패함)
+set ATTEMPTS=0
+:RETRY_MOVE
+ping 127.0.0.1 -n 2 >nul
+if not exist "{temp_exe}" goto START_APP
 move /y "{temp_exe}" "{target_exe}" >nul 2>&1
-if errorlevel 1 (
-    echo Retrying file replacement...
-    timeout /t 2 /nobreak >nul
-    move /y "{temp_exe}" "{target_exe}" >nul 2>&1
-)
+if not errorlevel 1 goto START_APP
 
+set /a ATTEMPTS+=1
+if %ATTEMPTS% LSS 30 goto RETRY_MOVE
+echo [ERROR] Failed to replace executable after 30 attempts.
+goto FINISH
+
+:START_APP
 echo Starting updated Remote Downloader ({resolved_tag})...
-start "" "{target_exe}"
-timeout /t 2 /nobreak >nul
+cd /d "{target_exe.parent}"
+start "" "{target_exe.name}"
+
+:FINISH
+ping 127.0.0.1 -n 3 >nul
 del "%~f0" >nul 2>&1
 """
 
@@ -1182,12 +1189,13 @@ del "%~f0" >nul 2>&1
         return jsonify({"status": "error", "error": f"업데이터 스크립트 생성 실패: {e}"}), 500
 
     # 배치 스크립트를 독립 프로세스로 백그라운드 구동
-    DETACHED_PROCESS = 0x00000008
+    CREATE_NO_WINDOW = 0x08000000
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     try:
         subprocess.Popen(
             ["cmd.exe", "/c", str(updater_bat)],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            cwd=str(target_exe.parent),
+            creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
     except Exception as e:
@@ -1197,9 +1205,9 @@ del "%~f0" >nul 2>&1
         f"본 프로그램({target_exe.name})이 {resolved_tag} 버전으로 업데이트 및 재시작됩니다."
     )
 
-    # 1.5초 후 메인 프로세스 종료 예약
+    # 1초 후 메인 프로세스 종료 예약
     def _delayed_exit():
-        time.sleep(1.5)
+        time.sleep(1.0)
         os._exit(0)
 
     threading.Thread(target=_delayed_exit, daemon=True).start()
