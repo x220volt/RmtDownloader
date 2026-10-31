@@ -1,7 +1,6 @@
 """네이버 MYBOX (mybox.naver.com) 공유 링크 리졸버 모듈."""
 
 import logging
-import urllib.parse
 from typing import Optional
 from urllib.parse import parse_qs, quote, urlparse
 

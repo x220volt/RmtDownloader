@@ -6,9 +6,7 @@ Cloudflare Turnstile 보호를 DrissionPage(로컬 스텔스 브라우저) 또�
 
 import logging
 import os
-import re
 import time
-from html import unescape
 from typing import Optional
 from urllib.parse import unquote, urljoin, urlparse
 

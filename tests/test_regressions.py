@@ -461,7 +461,6 @@ class ResolverLifecycleTests(unittest.TestCase):
         import tempfile
 
         from downloader.torrent_engine import (
-            bdecode,
             parse_aria2_summary_line,
             parse_bytes_string,
             parse_torrent_file,
@@ -521,7 +520,6 @@ class ResolverLifecycleTests(unittest.TestCase):
 
         import app as app_module
         from app import app
-        from config import load_settings
 
         client = app.test_client()
 
@@ -1689,7 +1687,7 @@ class DuplicateExclusionAndRetryTests(unittest.TestCase):
         """자동/수동 다운로드 구분 플래그 및 API/매니저 연동 검증."""
         import tempfile
 
-        from downloader.manager import DownloadJob, DownloadManager
+        from downloader.manager import DownloadManager
         from downloader.url_helper import parse_download_candidates
 
         with tempfile.TemporaryDirectory() as tmp_dir:

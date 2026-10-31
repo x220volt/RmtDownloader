@@ -11,8 +11,6 @@ from ..engine import (
     _FINALIZE_LOCK,
     _parse_content_range,
     format_bytes,
-    format_eta,
-    format_speed,
     get_unique_filename,
     sanitize_filename,
 )

@@ -320,6 +320,7 @@ class DownloadTask:
         total_bytes = None
         downloaded_bytes = 0
         header_resolved = False
+        resp = None
 
         try:
             while not self._is_stopped:

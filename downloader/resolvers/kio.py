@@ -3,7 +3,7 @@
 import logging
 import re
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import requests
 

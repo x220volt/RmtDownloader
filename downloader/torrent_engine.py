@@ -1,12 +1,10 @@
 """BitTorrent 마그넷 및 .torrent 파일 다운로드를 위한 전용 엔진 (aria2 기반)."""
 
-import hashlib
 import logging
 import os
 import re
 import subprocess
 import threading
-import time
 from typing import Callable, Optional
 
 from .aria2_manager import get_aria2_path

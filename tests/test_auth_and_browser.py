@@ -11,7 +11,6 @@ from auth import (
     credential_signature,
     hash_password,
     is_token_authorized,
-    session_authenticated,
     validate_credentials,
     verify_password,
 )
@@ -155,8 +154,8 @@ class AuthPrecedenceTests(unittest.TestCase):
         from config import load_settings
 
         settings = load_settings()
-        user = settings.get("auth_username", "admin")
-        pw = settings.get("auth_password", "password1234")
+        _user = settings.get("auth_username", "admin")
+        _pw = settings.get("auth_password", "password1234")
 
         # auth_password가 해시일 수 있으므로 설정 파일의 평문 또는 기본값 검사
         resp = self.client.post(

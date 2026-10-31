@@ -3,12 +3,11 @@
 import json
 import logging
 import re
-from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
-from ..engine import format_bytes, sanitize_filename, sanitize_folder_name
+from ..engine import format_bytes, sanitize_filename
 from .base import BaseResolver
 
 logger = logging.getLogger(__name__)

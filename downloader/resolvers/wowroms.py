@@ -1,12 +1,11 @@
 """WoWroms (wowroms.com) 게임 ROM / ISO / 에뮬레이터 다운로드 링크 리졸버."""
 
 import hashlib
-import html
 import logging
 import re
 import time
 from typing import Optional
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -77,7 +76,7 @@ class WowromsResolver(BaseResolver):
         # 1. 게임 소개/상세 페이지인 경우 다운로드 링크를 찾아 다운로드 페이지로 이동
         form = soup.find("form", id="submitForm")
         if not form:
-            logger.info(f"[WoWroms] 게임 상세 페이지 감지 -> 다운로드 페이지 링크 검색 중...")
+            logger.info("[WoWroms] 게임 상세 페이지 감지 -> 다운로드 페이지 링크 검색 중...")
             dl_link = None
             for a in soup.find_all("a", href=True):
                 href_str = str(a.get("href") or "").strip()

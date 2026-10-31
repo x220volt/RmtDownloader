@@ -1,9 +1,7 @@
 """원격 다운로더 전체 기능 통합 테스트 스크립트."""
 
-import json
 import os
 import sys
-import tempfile
 import unittest
 
 for stream in (sys.stdout, sys.stderr):
@@ -457,7 +455,6 @@ class TestRemoteDownloader(unittest.TestCase):
     def test_09_base64_mixed_text_and_password(self):
         """Base64 디코딩 시 한글 설명, 추출 코드 등이 섞여 있을 때 URL 및 비밀번호 분리 추출 검증."""
         from downloader.url_helper import (
-            extract_clean_url_and_password,
             parse_download_candidates,
         )
 

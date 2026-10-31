@@ -101,7 +101,7 @@ class XShareResolver(BaseResolver):
 
         # Cloudflare Turnstile 보안 검증이 필요한 경우 로컬 브라우저 자동 우회 시도
         logger.info(
-            f"[X-Share] 보안 검증(Turnstile) 감지: 로컬 브라우저(DrissionPage) 자동 우회 진행..."
+            "[X-Share] 보안 검증(Turnstile) 감지: 로컬 브라우저(DrissionPage) 자동 우회 진행..."
         )
         page_url = (
             referer_url if "/s/" in referer_url else f"https://x-share.net/s/{file_id}"

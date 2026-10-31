@@ -3,7 +3,7 @@
 import logging
 import re
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
@@ -119,7 +119,7 @@ class GoogleDriveResolver(BaseResolver):
                     )
                 elif resp_view.status_code == 403:
                     raise PermissionError(
-                        f"Google Drive 파일 접근 권한이 없습니다 (403 Forbidden). 파일 공유 권한을 확인해주세요."
+                        "Google Drive 파일 접근 권한이 없습니다 (403 Forbidden). 파일 공유 권한을 확인해주세요."
                     )
             except (FileNotFoundError, PermissionError):
                 raise
@@ -140,7 +140,7 @@ class GoogleDriveResolver(BaseResolver):
                     )
                 elif resp.status_code == 403:
                     raise PermissionError(
-                        f"Google Drive 파일 접근 권한이 없거나 다운로드가 금지되어 있습니다 (403 Forbidden)."
+                        "Google Drive 파일 접근 권한이 없거나 다운로드가 금지되어 있습니다 (403 Forbidden)."
                     )
 
                 content_type = resp.headers.get("Content-Type", "").lower()

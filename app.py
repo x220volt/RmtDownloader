@@ -12,6 +12,7 @@ import time
 import zipfile
 from datetime import timedelta
 from pathlib import Path
+from typing import Optional
 
 from markupsafe import escape
 
@@ -759,7 +760,8 @@ def _is_mei_dir(p: Path) -> bool:
     """PyInstaller의 임시 압축 해제 디렉터리(_MEIxxxxxx)인지 확인합니다."""
     try:
         resolved = str(p.resolve()).lower()
-        if hasattr(sys, "_MEIPASS") and str(Path(sys._MEIPASS).resolve()).lower() in resolved:
+        mei_pass = getattr(sys, "_MEIPASS", None)
+        if mei_pass and str(Path(mei_pass).resolve()).lower() in resolved:
             return True
         if "_mei" in resolved:
             return True
@@ -1024,7 +1026,7 @@ _app_release_cache = {"time": 0.0, "data": None}
 APP_RELEASE_CACHE_TTL = 600.0  # 10분 캐시
 
 
-def is_newer_version(current_ver: str, target_ver: str) -> bool:
+def is_newer_version(current_ver: Optional[str], target_ver: Optional[str]) -> bool:
     """SemVer 버전 비교 (예: 'v0.1.34' vs 'v0.1.35'). target_ver가 더 크면 True."""
     if not target_ver:
         return False

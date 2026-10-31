@@ -2,7 +2,6 @@
 
 import logging
 import mimetypes
-import os
 import re
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
