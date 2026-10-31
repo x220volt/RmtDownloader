@@ -283,6 +283,21 @@ class AppUpdateSecurityTests(unittest.TestCase):
         resp = client.post("/api/app/update", json={})
         self.assertIn(resp.status_code, (401, 302))
 
+    def test_get_extension_dir_excludes_mei_and_detects_properly(self):
+        from app import _is_mei_dir, _get_extension_dir
+        from pathlib import Path
+
+        # 1. _is_mei_dir 체크
+        mei_path = Path("C:/Users/sharp/AppData/Local/Temp/_MEI123456/extension")
+        self.assertTrue(_is_mei_dir(mei_path))
+        normal_path = Path("C:/Users/sharp/Documents/RemoteDownloader-Extension")
+        self.assertFalse(_is_mei_dir(normal_path))
+
+        # 2. _get_extension_dir() 결과가 non-MEI 경로인지 확인
+        detected = _get_extension_dir()
+        self.assertFalse(_is_mei_dir(detected))
+        self.assertTrue(str(detected).endswith("extension") or str(detected).endswith("RemoteDownloader-Extension"))
+
     def test_app_update_check_api(self):
         from app import app
         from unittest.mock import patch, MagicMock

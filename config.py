@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "ignore_ssl_certs": False,
     "session_lifetime_days": 30,
     "secret_key": "",
+    "extension_dir": "",
 }
 
 

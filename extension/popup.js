@@ -1782,7 +1782,7 @@ async function applyExtensionUpdate() {
         }
       }, 1200);
     } else {
-      const errMsg = data.detail || (res.status === 401 ? "로그인이 필요합니다." : "업데이트 실패");
+      const errMsg = data.error || data.detail || data.message || (res.status === 401 ? "로그인이 필요합니다." : "업데이트 실패");
       showPopupToast(errMsg, true);
       applyUpdateBtn.disabled = false;
       applyUpdateBtn.innerHTML = originalHtml;

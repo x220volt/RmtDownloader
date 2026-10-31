@@ -755,15 +755,126 @@ EXTENSION_ALLOWED_EXTENSIONS = {
 }
 
 
+def _is_mei_dir(p: Path) -> bool:
+    """PyInstaller의 임시 압축 해제 디렉터리(_MEIxxxxxx)인지 확인합니다."""
+    try:
+        resolved = str(p.resolve()).lower()
+        if hasattr(sys, "_MEIPASS") and str(Path(sys._MEIPASS).resolve()).lower() in resolved:
+            return True
+        if "_mei" in resolved:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _find_extension_in_browser_preferences() -> Optional[Path]:
+    """Chrome, Edge, Whale, Brave 등의 브라우저 프로필에서 설치된 확장 프로그램 경로를 검색합니다."""
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if not local_app_data:
+        return None
+
+    browser_user_data_dirs = [
+        Path(local_app_data) / "Google" / "Chrome" / "User Data",
+        Path(local_app_data) / "Microsoft" / "Edge" / "User Data",
+        Path(local_app_data) / "Naver" / "Naver Whale" / "User Data",
+        Path(local_app_data) / "BraveSoftware" / "Brave-Browser" / "User Data",
+    ]
+
+    for b_dir in browser_user_data_dirs:
+        if not b_dir.is_dir():
+            continue
+        try:
+            for profile_dir in b_dir.iterdir():
+                if not profile_dir.is_dir():
+                    continue
+                for pref_name in ("Secure Preferences", "Preferences"):
+                    pref_path = profile_dir / pref_name
+                    if not pref_path.is_file():
+                        continue
+                    try:
+                        pref_data = json.loads(pref_path.read_text(encoding="utf-8", errors="ignore"))
+                        settings_dict = pref_data.get("extensions", {}).get("settings", {})
+                        for _ext_id, ext_info in settings_dict.items():
+                            p_val = ext_info.get("path")
+                            if not p_val or not isinstance(p_val, str):
+                                continue
+                            candidate_path = Path(p_val).resolve()
+                            if candidate_path.is_dir() and not _is_mei_dir(candidate_path):
+                                m_path = candidate_path / "manifest.json"
+                                if m_path.is_file():
+                                    try:
+                                        m_data = json.loads(m_path.read_text(encoding="utf-8", errors="ignore"))
+                                        m_name = m_data.get("name", "")
+                                        if "Remote Downloader" in m_name or "원격 다운로더" in m_name:
+                                            return candidate_path
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return None
+
+
 def _get_extension_dir() -> Path:
-    """크롬 확장 프로그램 디렉터리 경로를 확인합니다."""
-    exe_dir = Path(sys.executable).resolve().parent
-    if (exe_dir / "extension").is_dir():
-        return (exe_dir / "extension").resolve()
-    src_dir = Path(__file__).resolve().parent
-    if (src_dir / "extension").is_dir():
-        return (src_dir / "extension").resolve()
-    return (src_dir / "extension").resolve()
+    """크롬 확장 프로그램 디렉터리 경로를 지능적으로 확인합니다.
+    
+    1. config.json 설정(extension_dir)에 유효한 경로가 지정되어 있는지 확인
+    2. 로컬 브라우저(Chrome, Edge 등)의 확장 프로그램 설정에서 'Remote Downloader' 설치 경로 자동 탐색
+    3. 일반적인 확장 프로그램 경로 후보군 확인 (Documents, Downloads 등)
+    4. 위 후보가 없을 경우 Documents/RemoteDownloader-Extension 을 기본 경로로 선정
+    (주의: PyInstaller 번들 임시 폴더인 _MEIxxxxxx는 대상에서 영구 배제)
+    """
+    settings = load_settings()
+    configured_dir = (settings.get("extension_dir") or "").strip()
+    if configured_dir:
+        cand = Path(configured_dir).resolve()
+        if cand.is_dir() and not _is_mei_dir(cand) and (cand / "manifest.json").exists():
+            return cand
+
+    # 1. 브라우저 프로필 자동 검색
+    detected_from_browser = _find_extension_in_browser_preferences()
+    if detected_from_browser:
+        try:
+            save_settings({"extension_dir": str(detected_from_browser)})
+        except Exception:
+            pass
+        return detected_from_browser
+
+    # 2. 후보 경로 탐색
+    home_dir = Path.home()
+    candidates = [
+        home_dir / "Documents" / "RemoteDownloader-Extension",
+        home_dir / "Downloads" / "RemoteDownloader-Extension",
+        home_dir / "Downloads" / "rd" / "extension",
+        Path(sys.executable).resolve().parent / "RemoteDownloader-Extension",
+        Path(sys.executable).resolve().parent / "extension",
+    ]
+
+    # 소스 코드 직접 실행 환경인 경우 (PyInstaller frozen이 아닐 때만)
+    if not getattr(sys, "frozen", False):
+        candidates.append(Path(__file__).resolve().parent / "extension")
+
+    for cand in candidates:
+        cand_resolved = cand.resolve()
+        if _is_mei_dir(cand_resolved):
+            continue
+        if cand_resolved.is_dir() and (cand_resolved / "manifest.json").exists():
+            try:
+                save_settings({"extension_dir": str(cand_resolved)})
+            except Exception:
+                pass
+            return cand_resolved
+
+    # 3. 모두 실패한 경우 기본값
+    default_dir = (home_dir / "Documents" / "RemoteDownloader-Extension").resolve()
+    default_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        save_settings({"extension_dir": str(default_dir)})
+    except Exception:
+        pass
+    return default_dir
 
 
 def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
