@@ -968,20 +968,7 @@ class DownloadManager:
                         "eta_str": job.eta_str,
                     },
                 )
-                self._broadcast(
-                    "job_progress",
-                    {
-                        "id": job.id,
-                        "downloaded_bytes": downloaded_bytes,
-                        "total_bytes": total_bytes,
-                        "downloaded_str": format_bytes(downloaded_bytes),
-                        "total_str": format_bytes(total_bytes),
-                        "speed_bps": speed_bps,
-                        "speed_str": job.speed_str,
-                        "progress": round(progress, 1),
-                        "eta_str": job.eta_str,
-                    },
-                )
+
 
             task_exc = None
             try:

@@ -628,7 +628,8 @@ class DownloadTask:
                         }
 
             # 5. 다운로드 완료 후 .part -> 최종 파일명으로 rename
-            resp.close()
+            if resp is not None:
+                resp.close()
             session.close()
 
             # 파일명 충돌 방지
