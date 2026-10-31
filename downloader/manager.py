@@ -83,6 +83,7 @@ class DownloadJob:
         # 내부 제어 객체
         self.task: Optional[Any] = None
         self.thread: Optional[threading.Thread] = None
+        self._last_log_time: float = 0.0
 
     def to_dict(self) -> dict:
         """클라이언트 전달용 직렬화 딕셔너리 반환."""
@@ -945,6 +946,36 @@ class DownloadManager:
                     job.progress = progress
                     job.eta_seconds = eta_seconds
                     job.eta_str = format_eta(eta_seconds)
+
+                    now = time.time()
+                    last_log = getattr(job, "_last_log_time", 0.0)
+                    if now - last_log >= 30.0:
+                        job._last_log_time = now
+                        logger.info(
+                            "작업 %s 진행 중: %s (%s / %s, %.1f%%, %s, 남은시간: %s)",
+                            job.id[:8],
+                            job.filename,
+                            format_bytes(downloaded_bytes),
+                            format_bytes(total_bytes),
+                            progress,
+                            job.speed_str,
+                            job.eta_str,
+                        )
+
+                self._broadcast(
+                    "job_progress",
+                    {
+                        "id": job.id,
+                        "downloaded_bytes": downloaded_bytes,
+                        "total_bytes": total_bytes,
+                        "downloaded_str": format_bytes(downloaded_bytes),
+                        "total_str": format_bytes(total_bytes),
+                        "speed_bps": speed_bps,
+                        "speed_str": job.speed_str,
+                        "progress": round(progress, 1),
+                        "eta_str": job.eta_str,
+                    },
+                )
 
             def on_status(msg: str):
                 if job is None:

@@ -1288,8 +1288,15 @@ goto FINISH
 
 :START_APP
 echo Starting updated Remote Downloader ({resolved_tag})...
+:: PyInstaller onefile 부모 프로세스의 임시폴더(_MEI) 환경 상속 차단 (재시작 실패 원인)
+set PYINSTALLER_RESET_ENVIRONMENT=1
+set _MEIPASS2=
+set _PYI_APPLICATION_HOME_DIR=
+set _PYI_ARCHIVE_FILE=
+set _PYI_PARENT_PROCESS_LEVEL=
+set _PYI_SPLASH_IPC=
 cd /d "{target_exe.parent}"
-start "" "{target_exe.name}"
+start "" "{target_exe}"
 
 :FINISH
 ping 127.0.0.1 -n 3 >nul
@@ -1305,9 +1312,16 @@ del "%~f0" >nul 2>&1
     CREATE_NO_WINDOW = 0x08000000
     CREATE_NEW_PROCESS_GROUP = 0x00000200
     try:
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("_PYI_") and k != "_MEIPASS2"
+        }
+        clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
         subprocess.Popen(
             ["cmd.exe", "/c", str(updater_bat)],
             cwd=str(target_exe.parent),
+            env=clean_env,
             creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
