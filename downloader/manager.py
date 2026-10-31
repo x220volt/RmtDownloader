@@ -6,7 +6,9 @@ import queue
 import tempfile
 import threading
 import time
+import socket
 import uuid
+import requests
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -74,6 +76,10 @@ class DownloadJob:
             or ""
         ).strip()
 
+        # 자동 재시도 제어 (대용량 다운로드 중단 대비 이어받기 재시도)
+        self.retry_count: int = 0
+        self.max_retries: int = 3
+
         # 내부 제어 객체
         self.task: Optional[Any] = None
         self.thread: Optional[threading.Thread] = None
@@ -108,6 +114,8 @@ class DownloadJob:
             "completed_at": self.completed_at,
             "is_auto": self.is_auto,
             "download_type": self.download_type,
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
         }
 
 
@@ -129,6 +137,78 @@ class DownloadManager:
 
         # 워커 스레드 초기화
         self._start_workers()
+
+    @staticmethod
+    def _is_permanent_error(err_msg: str) -> bool:
+        """재시도해도 성공할 수 없는 영구적인 오류인지 확인합니다."""
+        if not err_msg:
+            return False
+        msg = str(err_msg).lower()
+        permanent_keywords = (
+            "404 not found",
+            "not found",
+            "파일을 찾을 수 없습니다",
+            "존재하지 않는 파일",
+            "비밀번호가 올바르지 않습니다",
+            "wrong password",
+            "incorrect password",
+            "접근 권한이 없습니다",
+            "사용자 요청으로 다운로드가 취소",
+            "용량이 부족합니다",
+            "disk full",
+            "no space left",
+            "웹페이지(html)",
+            "turnstile",
+        )
+        return any(k in msg for k in permanent_keywords)
+
+    @classmethod
+    def _is_retryable_error(cls, exc: Any) -> bool:
+        """다운로드 중단 시 자동 이어받기 재시도가 가능한 네트워크/서버 오류인지 확인합니다."""
+        if exc is None:
+            return True
+        if cls._is_permanent_error(str(exc)):
+            return False
+        # 버그성 프로그래밍 예외는 재시도 대상에서 제외 (즉시 실패 처리)
+        if isinstance(
+            exc,
+            (
+                TypeError,
+                KeyError,
+                AttributeError,
+                IndexError,
+                NotImplementedError,
+                RuntimeError,
+            ),
+        ):
+            return False
+        if isinstance(exc, (requests.exceptions.RequestException, socket.error, OSError)):
+            return True
+        err_str = str(exc).lower()
+        retryable_keywords = (
+            "connection",
+            "timeout",
+            "timed out",
+            "reset",
+            "closed",
+            "abort",
+            "broken pipe",
+            "chunk",
+            "incomplete",
+            "disconnect",
+            "network",
+            "eof",
+            "failed",
+            "다운로드 실패",
+            "500",
+            "502",
+            "503",
+            "504",
+            "403",
+            "401",
+            "410",
+        )
+        return any(k in err_str for k in retryable_keywords)
 
     def _load_history(self):
         """이전에 다운로드 완료된 URL 히스토리를 로드합니다."""
@@ -504,6 +584,7 @@ class DownloadManager:
 
             job.status = "queued"
             job.error_message = ""
+            job.retry_count = 0
             job.completed_at = None
             job.speed_bps = 0.0
             job.speed_str = "0 KB/s"
@@ -855,6 +936,8 @@ class DownloadManager:
                 with self._lock:
                     if self.jobs.get(job_id) is not job or job.status != "downloading":
                         return
+                    if job.error_message:
+                        job.error_message = ""
                     job.downloaded_bytes = downloaded_bytes
                     job.total_bytes = total_bytes
                     job.speed_bps = speed_bps
@@ -862,6 +945,29 @@ class DownloadManager:
                     job.progress = progress
                     job.eta_seconds = eta_seconds
                     job.eta_str = format_eta(eta_seconds)
+
+            def on_status(msg: str):
+                if job is None:
+                    return
+                with self._lock:
+                    if self.jobs.get(job_id) is not job or job.status != "downloading":
+                        return
+                    job.error_message = msg
+                self._broadcast(
+                    "job_progress",
+                    {
+                        "id": job.id,
+                        "error_message": msg,
+                        "downloaded_bytes": job.downloaded_bytes,
+                        "total_bytes": job.total_bytes,
+                        "downloaded_str": format_bytes(job.downloaded_bytes),
+                        "total_str": format_bytes(job.total_bytes),
+                        "speed_bps": 0.0,
+                        "speed_str": "0 KB/s",
+                        "progress": round(job.progress, 1),
+                        "eta_str": job.eta_str,
+                    },
+                )
                 self._broadcast(
                     "job_progress",
                     {
@@ -877,6 +983,7 @@ class DownloadManager:
                     },
                 )
 
+            task_exc = None
             try:
                 if resolved.get("task_factory"):
                     task = resolved["task_factory"](job, job.download_dir, on_progress)
@@ -933,6 +1040,7 @@ class DownloadManager:
                             or job.options.get("referer"),
                             chunk_size=settings.get("chunk_size_kb", 256) * 1024,
                             progress_callback=on_progress,
+                            status_callback=on_status,
                             method=resolved.get("method")
                             or job.options.get("method", "GET"),
                             post_data=resolved.get("post_data")
@@ -953,6 +1061,7 @@ class DownloadManager:
                 ):
                     raise ValueError(result["error"])
             except Exception as exc:
+                task_exc = exc
                 if (
                     "웹페이지(HTML)" in str(exc)
                     and resolved.get("source_service") == "Direct"
@@ -1034,22 +1143,97 @@ class DownloadManager:
                     job.speed_bps = 0.0
                     job.speed_str = "0 KB/s"
                 else:
-                    job.status = "failed"
-                    job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    job.error_message = result.get("error", "다운로드 실패")
-                    job.speed_bps = 0.0
-                    job.speed_str = "0 KB/s"
-                    if (
-                        "downloaded_bytes" in result
-                        and result["downloaded_bytes"] is not None
-                    ):
-                        job.downloaded_bytes = result["downloaded_bytes"]
-                    if "total_bytes" in result and result["total_bytes"] is not None:
-                        job.total_bytes = result["total_bytes"]
-                    if job.total_bytes and job.total_bytes > 0:
-                        job.progress = min(
-                            100.0, (job.downloaded_bytes / job.total_bytes) * 100.0
+                    err_msg = result.get("error", "다운로드 실패")
+                    is_retryable = self._is_retryable_error(task_exc if task_exc is not None else err_msg)
+                    can_retry = (
+                        is_retryable
+                        and job.status not in ("cancelled", "paused")
+                        and job.retry_count < job.max_retries
+                        and not self._stop_event.is_set()
+                    )
+
+                    if can_retry:
+                        job.retry_count += 1
+                        delay_sec = min(3 * job.retry_count, 15)
+                        job.status = "queued"
+                        job.error_message = (
+                            f"다운로드 중단: {delay_sec}초 후 이어받기 재시도 ({job.retry_count}/{job.max_retries})"
                         )
+                        job.speed_bps = 0.0
+                        job.speed_str = "0 KB/s"
+                        # 이전 만료되었을 수 있는 직링크 정보 정리하여 리졸버 재호출 유도
+                        job.resolved_url = ""
+                        job.options.pop("_pre_resolved", None)
+
+                        # 디스크의 .part 크기를 현재 다운로드 진행도로 갱신
+                        p_file = self._find_part_path(job)
+                        if p_file and os.path.exists(p_file):
+                            try:
+                                part_size = os.path.getsize(p_file)
+                                job.downloaded_bytes = part_size
+                                if job.total_bytes and job.total_bytes > 0:
+                                    job.progress = min(
+                                        100.0, (part_size / job.total_bytes) * 100.0
+                                    )
+                            except OSError:
+                                pass
+
+                        logger.warning(
+                            "작업 %s 다운로드 중단 (%s). %d초 후 이어받기 재시도 (%d/%d)...",
+                            job.id,
+                            err_msg,
+                            delay_sec,
+                            job.retry_count,
+                            job.max_retries,
+                        )
+
+                        job.task = None
+                        job.thread = None
+                        self._broadcast("job_updated", job.to_dict())
+
+                        def _requeue_timer(j_id):
+                            with self._lock:
+                                j = self.jobs.get(j_id)
+                                if (
+                                    not j
+                                    or j.status != "queued"
+                                    or self._stop_event.is_set()
+                                ):
+                                    return
+                                logger.info(
+                                    "작업 %s 이어받기 재시도 큐 진입 (시도 %d/%d)",
+                                    j.id,
+                                    j.retry_count,
+                                    j.max_retries,
+                                )
+                                self.queue.put(j.id)
+                                self._broadcast("job_updated", j.to_dict())
+
+                        timer = threading.Timer(
+                            float(delay_sec), _requeue_timer, args=[job.id]
+                        )
+                        timer.daemon = True
+                        timer.start()
+
+                        self.queue.task_done()
+                        continue
+                    else:
+                        job.status = "failed"
+                        job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        job.error_message = err_msg
+                        job.speed_bps = 0.0
+                        job.speed_str = "0 KB/s"
+                        if (
+                            "downloaded_bytes" in result
+                            and result["downloaded_bytes"] is not None
+                        ):
+                            job.downloaded_bytes = result["downloaded_bytes"]
+                        if "total_bytes" in result and result["total_bytes"] is not None:
+                            job.total_bytes = result["total_bytes"]
+                        if job.total_bytes and job.total_bytes > 0:
+                            job.progress = min(
+                                100.0, (job.downloaded_bytes / job.total_bytes) * 100.0
+                            )
 
                 job.task = None
                 job.thread = None

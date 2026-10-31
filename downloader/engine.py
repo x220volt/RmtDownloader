@@ -206,6 +206,8 @@ class DownloadTask:
         partial_id: str = "",
         method: str = "GET",
         post_data: dict | None = None,
+        max_retries: int = 5,
+        retry_delay_base: float = 0.5,
     ):
         self.partial_id = re.sub(r"[^a-zA-Z0-9_-]", "", partial_id)
         self.url = url
@@ -219,6 +221,8 @@ class DownloadTask:
         self.status_callback = status_callback
         self.method = (method or "GET").upper()
         self.post_data = post_data
+        self.max_retries = max(0, int(max_retries))
+        self.retry_delay_base = max(0.0, float(retry_delay_base))
 
         self._is_stopped = False
         self._is_paused = False
@@ -310,200 +314,318 @@ class DownloadTask:
             f".{self.partial_id}.part" if self.partial_id else ".part"
         )
 
-        # 2. 기존 .part 파일이 있는지 확인하여 이어받기(Resume) 시도
-        existing_size = os.path.getsize(part_path) if os.path.exists(part_path) else 0
-        if existing_size > 0:
-            req_headers["Range"] = f"bytes={existing_size}-"
-            logger.info(f"이어받기 시도: {existing_size} bytes ({dest_filename})")
-
-        downloaded_bytes = existing_size
+        # 2. 스트리밍 다운로드 및 자동 이어받기 재시도 루프
+        MAX_RETRIES = self.max_retries
+        stream_retry_count = 0
         total_bytes = None
+        downloaded_bytes = 0
+        header_resolved = False
 
-        resp = None
         try:
-            resp = _request_stream(req_headers)
-
-            # 서버가 416 Range Not Satisfiable 반환 시 처음부터 재시도
-            if resp.status_code == 416 and existing_size > 0:
-                logger.warning("Range 416 오류: 처음부터 다시 다운로드합니다.")
-                resp.close()
-                req_headers.pop("Range", None)
-                existing_size = 0
-                resp = _request_stream(req_headers)
-
-            resp.raise_for_status()
-
-            # HTML 웹페이지/보호페이지 응답 검사 (직링크가 아닌 웹페이지를 다운로드로 오인하지 않도록 방지)
-            ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-            url_path = urlparse(self.url).path.lower()
-            is_explicit_html = url_path.endswith((".html", ".htm"))
-            if ct in ("text/html", "application/xhtml+xml") and not is_explicit_html:
-                resp.close()
-                raise ValueError(
-                    "다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다. 올바른 직링크가 아니거나 Cloudflare/로그인 등의 보호 페이지일 수 있습니다."
+            while not self._is_stopped:
+                resp = None
+                is_partial = False
+                attempt_start_bytes = (
+                    os.path.getsize(part_path) if os.path.exists(part_path) else 0
                 )
-
-            # 응답 헤더에서 더 정확한 파일명이 있으면 업데이트
-            header_filename = extract_filename_from_headers(
-                resp.headers, None if self.filename else resp.url
-            )
-            if header_filename and sanitize_filename(header_filename) != self.filename:
-                new_sanitized = sanitize_filename(header_filename)
-                new_target = os.path.join(self.dest_dir, new_sanitized)
-                new_part = new_target + (
-                    f".{self.partial_id}.part" if self.partial_id else ".part"
-                )
-                if not os.path.exists(part_path) or existing_size == 0:
-                    self.filename = new_sanitized
-                    dest_filename = self.filename
-                    target_path = new_target
-                    part_path = new_part
-
-            # 확장자가 없는 파일명인 경우 Content-Type 헤더로 확장자 보완
-            if "." not in self.filename and existing_size == 0:
-                ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-                mime_ext = _MIME_MAP.get(ct) or mimetypes.guess_extension(ct)
-                if mime_ext:
-                    self.filename = f"{self.filename}{mime_ext}"
-                    dest_filename = self.filename
-                    target_path = os.path.join(self.dest_dir, dest_filename)
-                    part_path = target_path + (
-                        f".{self.partial_id}.part" if self.partial_id else ".part"
-                    )
-
-            # 3. 이어받기 성공 여부 확인
-            is_partial = resp.status_code == 206
-            if is_partial:
-                cr = _parse_content_range(resp.headers.get("Content-Range", ""))
-                if not cr or cr[0] != existing_size:
-                    logger.warning("서버 Content-Range 불일치로 처음부터 재시도합니다.")
-                    resp.close()
-                    req_headers.pop("Range", None)
-                    existing_size = 0
-                    resp = _request_stream(req_headers)
-                    resp.raise_for_status()
-                    if resp.status_code == 206:
-                        retry_range = _parse_content_range(
-                            resp.headers.get("Content-Range", "")
-                        )
-                        if not retry_range or retry_range[0] != 0:
-                            raise ValueError(
-                                "Invalid Content-Range on full download retry"
-                            )
-                    is_partial = resp.status_code == 206
-
-            if is_partial:
-                file_mode = "ab" if existing_size > 0 else "wb"
+                existing_size = attempt_start_bytes
                 downloaded_bytes = existing_size
-                cr = _parse_content_range(resp.headers.get("Content-Range", ""))
-                total_bytes = cr[2] if cr else None
-                if total_bytes is None:
-                    cl = resp.headers.get("Content-Length")
-                    if cl and cl.isdigit():
-                        total_bytes = int(cl) + existing_size
-            else:
-                file_mode = "wb"
-                downloaded_bytes = 0
-                cl = resp.headers.get("Content-Length")
-                total_bytes = int(cl) if cl and cl.isdigit() else None
 
-            # 4. 스트리밍 다운로드 루프
-            last_report_time = time.time()
-            speed_calc_start = last_report_time
-            bytes_since_calc = 0
-            current_speed = 0.0
+                # 이미 전체 파일 크기만큼 다운로드되어 있다면 완료로 진행
+                if total_bytes is not None and existing_size >= total_bytes:
+                    break
 
-            with open(part_path, file_mode) as f:
-                for chunk in resp.iter_content(chunk_size=self.chunk_size):
-                    if self._is_stopped:
+                if existing_size > 0:
+                    req_headers["Range"] = f"bytes={existing_size}-"
+                    logger.info(f"이어받기 시도: {existing_size} bytes ({dest_filename})")
+                else:
+                    req_headers.pop("Range", None)
+
+                try:
+                    resp = _request_stream(req_headers)
+
+                    # 서버가 416 Range Not Satisfiable 반환 시 처음부터 재시도
+                    if resp.status_code == 416 and existing_size > 0:
+                        logger.warning("Range 416 오류: 처음부터 다시 다운로드합니다.")
                         resp.close()
-                        session.close()
-                        if self._is_paused:
-                            logger.info(f"다운로드 일시중지됨: {dest_filename}")
-                            return {
-                                "success": False,
-                                "status": "paused",
-                                "message": "일시중지되었습니다.",
-                                "downloaded_bytes": downloaded_bytes,
-                                "total_bytes": total_bytes,
-                            }
-                        else:
-                            # 취소의 경우 .part 파일 삭제 여부 선택 가능, 여기선 보관/삭제
-                            logger.info(f"다운로드 취소됨: {dest_filename}")
-                            f.close()
-                            if os.path.exists(part_path):
-                                try:
-                                    os.remove(part_path)
-                                except Exception:
-                                    pass
-                            return {
-                                "success": False,
-                                "status": "cancelled",
-                                "message": "다운로드가 취소되었습니다.",
-                            }
+                        req_headers.pop("Range", None)
+                        existing_size = 0
+                        attempt_start_bytes = 0
+                        downloaded_bytes = 0
+                        resp = _request_stream(req_headers)
 
-                    if not chunk:
-                        continue
+                    resp.raise_for_status()
 
-                    # 첫 번째 청크에서 HTML 태그 및 Cloudflare 보안 페이지 감지
-                    if downloaded_bytes == 0:
-                        prefix = chunk[:512].lstrip().lower()
-                        if prefix.startswith((b"<!doctype html", b"<html")):
-                            is_cf = (
-                                b"challenges.cloudflare.com" in chunk
-                                or b"just a moment..." in chunk.lower()
-                                or b"cf-browser-verification" in chunk.lower()
+                    # HTML 웹페이지/보호페이지 응답 검사 (직링크가 아닌 웹페이지를 다운로드로 오인하지 않도록 방지)
+                    ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    url_path = urlparse(self.url).path.lower()
+                    is_explicit_html = url_path.endswith((".html", ".htm"))
+                    if ct in ("text/html", "application/xhtml+xml") and not is_explicit_html:
+                        resp.close()
+                        raise ValueError(
+                            "다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다. 올바른 직링크가 아니거나 Cloudflare/로그인 등의 보호 페이지일 수 있습니다."
+                        )
+
+                    # 첫 번째 요청 시 응답 헤더에서 더 정확한 파일명이 있으면 업데이트
+                    if not header_resolved:
+                        header_filename = extract_filename_from_headers(
+                            resp.headers, None if self.filename else resp.url
+                        )
+                        if (
+                            header_filename
+                            and sanitize_filename(header_filename) != self.filename
+                        ):
+                            new_sanitized = sanitize_filename(header_filename)
+                            new_target = os.path.join(self.dest_dir, new_sanitized)
+                            new_part = new_target + (
+                                f".{self.partial_id}.part" if self.partial_id else ".part"
                             )
-                            if not is_explicit_html or is_cf:
-                                resp.close()
-                                raise ValueError(
-                                    "다운로드 대상이 웹페이지(HTML) 또는 보안 확인(Cloudflare) 페이지입니다. 직링크를 확인해주세요."
+                            if not os.path.exists(part_path) or existing_size == 0:
+                                self.filename = new_sanitized
+                                dest_filename = self.filename
+                                target_path = new_target
+                                part_path = new_part
+
+                        # 확장자가 없는 파일명인 경우 Content-Type 헤더로 확장자 보완
+                        if "." not in self.filename and existing_size == 0:
+                            mime_ext = _MIME_MAP.get(ct) or mimetypes.guess_extension(ct)
+                            if mime_ext:
+                                self.filename = f"{self.filename}{mime_ext}"
+                                dest_filename = self.filename
+                                target_path = os.path.join(self.dest_dir, dest_filename)
+                                part_path = target_path + (
+                                    f".{self.partial_id}.part"
+                                    if self.partial_id
+                                    else ".part"
                                 )
+                        header_resolved = True
 
-                    f.write(chunk)
-                    chunk_len = len(chunk)
-                    downloaded_bytes += chunk_len
-                    bytes_since_calc += chunk_len
+                    # 3. 이어받기 성공 여부 확인
+                    is_partial = resp.status_code == 206
+                    if is_partial:
+                        cr = _parse_content_range(resp.headers.get("Content-Range", ""))
+                        if not cr or cr[0] != existing_size:
+                            logger.warning("서버 Content-Range 불일치로 처음부터 재시도합니다.")
+                            resp.close()
+                            req_headers.pop("Range", None)
+                            existing_size = 0
+                            attempt_start_bytes = 0
+                            downloaded_bytes = 0
+                            resp = _request_stream(req_headers)
+                            resp.raise_for_status()
+                            if resp.status_code == 206:
+                                retry_range = _parse_content_range(
+                                    resp.headers.get("Content-Range", "")
+                                )
+                                if not retry_range or retry_range[0] != 0:
+                                    raise ValueError(
+                                        "Invalid Content-Range on full download retry"
+                                    )
+                            is_partial = resp.status_code == 206
 
-                    now = time.time()
-                    elapsed = now - speed_calc_start
-                    if elapsed >= 0.5:
-                        current_speed = bytes_since_calc / elapsed
-                        speed_calc_start = now
-                        bytes_since_calc = 0
+                    if is_partial:
+                        file_mode = "ab" if existing_size > 0 else "wb"
+                        downloaded_bytes = existing_size
+                        cr = _parse_content_range(resp.headers.get("Content-Range", ""))
+                        if total_bytes is None:
+                            total_bytes = cr[2] if cr else None
+                            if total_bytes is None:
+                                cl = resp.headers.get("Content-Length")
+                                if cl and cl.isdigit():
+                                    total_bytes = int(cl) + existing_size
+                    else:
+                        if existing_size > 0:
+                            logger.warning("서버가 이어받기(Range)를 지원하지 않아 처음부터 다시 다운로드합니다.")
+                        file_mode = "wb"
+                        downloaded_bytes = 0
+                        attempt_start_bytes = 0
+                        cl = resp.headers.get("Content-Length")
+                        total_bytes = int(cl) if cl and cl.isdigit() else None
 
-                    if now - last_report_time >= 0.3:
-                        last_report_time = now
-                        if self.progress_callback:
-                            percent = (
-                                (downloaded_bytes / total_bytes * 100.0)
-                                if total_bytes and total_bytes > 0
-                                else 0.0
+                    # 4. 스트리밍 다운로드 루프
+                    last_report_time = time.time()
+                    speed_calc_start = last_report_time
+                    bytes_since_calc = 0
+                    current_speed = 0.0
+
+                    with open(part_path, file_mode) as f:
+                        for chunk in resp.iter_content(chunk_size=self.chunk_size):
+                            if self._is_stopped:
+                                resp.close()
+                                session.close()
+                                if self._is_paused:
+                                    logger.info(f"다운로드 일시중지됨: {dest_filename}")
+                                    return {
+                                        "success": False,
+                                        "status": "paused",
+                                        "message": "일시중지되었습니다.",
+                                        "downloaded_bytes": downloaded_bytes,
+                                        "total_bytes": total_bytes,
+                                    }
+                                else:
+                                    logger.info(f"다운로드 취소됨: {dest_filename}")
+                                    f.close()
+                                    if os.path.exists(part_path):
+                                        try:
+                                            os.remove(part_path)
+                                        except Exception:
+                                            pass
+                                    return {
+                                        "success": False,
+                                        "status": "cancelled",
+                                        "message": "다운로드가 취소되었습니다.",
+                                    }
+
+                            if not chunk:
+                                continue
+
+                            # 첫 번째 청크에서 HTML 태그 및 Cloudflare 보안 페이지 감지
+                            if downloaded_bytes == 0:
+                                prefix = chunk[:512].lstrip().lower()
+                                if prefix.startswith((b"<!doctype html", b"<html")):
+                                    is_cf = (
+                                        b"challenges.cloudflare.com" in chunk
+                                        or b"just a moment..." in chunk.lower()
+                                        or b"cf-browser-verification" in chunk.lower()
+                                    )
+                                    if not is_explicit_html or is_cf:
+                                        resp.close()
+                                        raise ValueError(
+                                            "다운로드 대상이 웹페이지(HTML) 또는 보안 확인(Cloudflare) 페이지입니다. 직링크를 확인해주세요."
+                                        )
+
+                            f.write(chunk)
+                            chunk_len = len(chunk)
+                            downloaded_bytes += chunk_len
+                            bytes_since_calc += chunk_len
+
+                            now = time.time()
+                            elapsed = now - speed_calc_start
+                            if elapsed >= 0.5:
+                                current_speed = bytes_since_calc / elapsed
+                                speed_calc_start = now
+                                bytes_since_calc = 0
+
+                            if now - last_report_time >= 0.3:
+                                last_report_time = now
+                                if self.progress_callback:
+                                    percent = (
+                                        (downloaded_bytes / total_bytes * 100.0)
+                                        if total_bytes and total_bytes > 0
+                                        else 0.0
+                                    )
+                                    remaining_sec = (
+                                        (total_bytes - downloaded_bytes) / current_speed
+                                        if (total_bytes and current_speed > 0)
+                                        else None
+                                    )
+                                    self.progress_callback(
+                                        downloaded_bytes=downloaded_bytes,
+                                        total_bytes=total_bytes,
+                                        speed_bps=current_speed,
+                                        progress=percent,
+                                        eta_seconds=remaining_sec,
+                                    )
+
+                    if self._is_stopped:
+                        if not self._is_paused and os.path.exists(part_path):
+                            os.remove(part_path)
+                        return {
+                            "success": False,
+                            "status": "paused" if self._is_paused else "cancelled",
+                        }
+
+                    if total_bytes is not None and downloaded_bytes < total_bytes:
+                        raise ValueError(
+                            f"Incomplete download: expected {total_bytes}, received {downloaded_bytes}"
+                        )
+
+                    # 정상적으로 스트리밍 완료되었으므로 재시도 루프 탈출
+                    resp.close()
+                    break
+
+                except Exception as stream_err:
+                    if resp is not None:
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
+
+                    if self._is_stopped:
+                        session.close()
+                        return {
+                            "success": False,
+                            "status": "paused" if self._is_paused else "cancelled",
+                        }
+
+                    # 영구적인 오류는 재시도 없이 상위로 전달
+                    is_html_error = (
+                        isinstance(stream_err, ValueError)
+                        and "웹페이지(HTML)" in str(stream_err)
+                    )
+                    if is_html_error:
+                        session.close()
+                        raise stream_err
+
+                    if isinstance(stream_err, requests.HTTPError):
+                        code = getattr(stream_err.response, "status_code", 0)
+                        if code in (401, 403, 404, 410):
+                            session.close()
+                            raise stream_err
+
+                    # 이번 시도에서 파일 크기가 증가(진전)했는지 확인
+                    curr_part_size = (
+                        os.path.getsize(part_path)
+                        if os.path.exists(part_path)
+                        else downloaded_bytes
+                    )
+                    bytes_gained = curr_part_size - attempt_start_bytes
+                    if is_partial and bytes_gained > 0:
+                        stream_retry_count = 0
+                        logger.info(
+                            f"이어받기 진행 중 {bytes_gained} bytes 수신됨. 재시도 카운트 초기화."
+                        )
+
+                    stream_retry_count += 1
+                    if stream_retry_count > MAX_RETRIES:
+                        logger.error(
+                            f"최대 연속 재시도 횟수({MAX_RETRIES}회) 초과로 다운로드 실패: {stream_err}"
+                        )
+                        session.close()
+                        raise stream_err
+
+                    wait_sec = min(self.retry_delay_base * (0.5 * stream_retry_count), 5.0)
+                    logger.warning(
+                        f"다운로드 중단 발생 ({stream_err}). {wait_sec:.1f}초 후 이어받기 재시도 ({stream_retry_count}/{MAX_RETRIES})..."
+                    )
+                    if self.status_callback:
+                        try:
+                            self.status_callback(
+                                f"연결 끊김 감지: {wait_sec:.0f}초 후 이어받기 재시도 ({stream_retry_count}/{MAX_RETRIES})"
                             )
-                            remaining_sec = (
-                                (total_bytes - downloaded_bytes) / current_speed
-                                if (total_bytes and current_speed > 0)
-                                else None
-                            )
-                            self.progress_callback(
-                                downloaded_bytes=downloaded_bytes,
-                                total_bytes=total_bytes,
-                                speed_bps=current_speed,
-                                progress=percent,
-                                eta_seconds=remaining_sec,
-                            )
+                        except Exception:
+                            pass
 
-            if self._is_stopped:
-                if not self._is_paused and os.path.exists(part_path):
-                    os.remove(part_path)
-                return {
-                    "success": False,
-                    "status": "paused" if self._is_paused else "cancelled",
-                }
-            if total_bytes is not None and downloaded_bytes != total_bytes:
-                raise ValueError(
-                    f"Incomplete download: expected {total_bytes}, received {downloaded_bytes}"
-                )
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+                    session = requests.Session()
+                    session.headers.update(req_headers)
+
+                    if wait_sec > 0:
+                        steps = int(wait_sec / 0.1)
+                        for _ in range(max(1, steps)):
+                            if self._is_stopped:
+                                break
+                            time.sleep(0.1)
+
+                    if self._is_stopped:
+                        session.close()
+                        return {
+                            "success": False,
+                            "status": "paused" if self._is_paused else "cancelled",
+                        }
 
             # 5. 다운로드 완료 후 .part -> 최종 파일명으로 rename
             resp.close()

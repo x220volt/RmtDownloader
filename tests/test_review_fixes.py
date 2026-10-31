@@ -327,5 +327,127 @@ class AppUpdateSecurityTests(unittest.TestCase):
             self.assertTrue(data["has_exe_asset"])
 
 
+
+
+class AutoResumeAndRetryTests(unittest.TestCase):
+    """대용량 다운로드 중단 시 자동 이어받기 및 재시도 검증 테스트."""
+
+    def test_download_task_in_stream_retry_and_resume(self):
+        """다운로드 도중 네트워크 끊김이 발생해도 바로 취소되지 않고 Range 요청으로 이어받아 완료하는지 검증."""
+        from downloader.engine import DownloadTask
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            status_msgs = []
+
+            def on_status(msg):
+                status_msgs.append(msg)
+
+            task = DownloadTask(
+                url="https://example.com/huge.bin",
+                dest_dir=tmp_dir,
+                filename="huge.bin",
+                partial_id="test_part_1",
+                max_retries=3,
+                retry_delay_base=0.01,  # 테스트용 초고속 재시도
+                status_callback=on_status,
+            )
+
+            # 1차 요청 응답: 100바이트 수신 후 ConnectionResetError 발생
+            resp1 = Mock()
+            resp1.status_code = 200
+            resp1.headers = {
+                "Content-Length": "1000",
+                "Content-Type": "application/octet-stream",
+            }
+            resp1.url = "https://example.com/huge.bin"
+            resp1.raise_for_status = Mock()
+
+            def fail_iter(chunk_size=1024):
+                yield b"A" * 100
+                raise ConnectionResetError("일시적 네트워크 단절 시뮬레이션")
+
+            resp1.iter_content = fail_iter
+
+            # 2차 요청 응답 (이어받기): Range 100- 요청에 206 응답 및 나머지 900바이트 전송
+            resp2 = Mock()
+            resp2.status_code = 206
+            resp2.headers = {
+                "Content-Range": "bytes 100-999/1000",
+                "Content-Length": "900",
+                "Content-Type": "application/octet-stream",
+            }
+            resp2.url = "https://example.com/huge.bin"
+            resp2.raise_for_status = Mock()
+
+            def success_iter(chunk_size=1024):
+                yield b"B" * 900
+
+            resp2.iter_content = success_iter
+
+            calls = []
+
+            def mock_request(url, headers=None, **kwargs):
+                h = dict(headers or {})
+                calls.append(h)
+                if len(calls) == 1:
+                    return resp1
+                return resp2
+
+            with (
+                patch("downloader.engine.requests.Session.get", side_effect=mock_request),
+                patch("downloader.engine.requests.Session.head", return_value=Mock(status_code=405)),
+            ):
+                result = task.run()
+
+            # 단 1회의 task.run() 호출 내에서 자동 재시도되어 다운로드가 성공해야 함!
+            self.assertTrue(result["success"])
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["total_bytes"], 1000)
+
+            # 2차 요청 시 Range 헤더 검증
+            self.assertEqual(len(calls), 2)
+            self.assertIn("Range", calls[1])
+            self.assertEqual(calls[1]["Range"], "bytes=100-")
+
+            # 상태 콜백 확인
+            self.assertTrue(any("연결 끊김 감지" in msg for msg in status_msgs))
+
+            # 최종 파일 내용 검증 (100바이트 A + 900바이트 B)
+            final_file = Path(tmp_dir) / "huge.bin"
+            self.assertTrue(final_file.exists())
+            self.assertEqual(final_file.read_bytes(), b"A" * 100 + b"B" * 900)
+
+    def test_manager_worker_requeues_and_resumes_on_download_failure(self):
+        """직링크 만료나 태스크 오류 시 바로 실패하지 않고 워커 레벨에서 재시도 큐에 진입하는지 검증."""
+        from downloader.manager import DownloadManager, DownloadJob
+        import requests
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dm = DownloadManager(settings_getter=lambda: {"download_dir": tmp_dir})
+            dm._stop_event.set()  # 워커 스레드 중지 상태로 단위 검사
+
+            job = DownloadJob(
+                url="https://example.com/test.zip",
+                download_dir=tmp_dir,
+            )
+            job.id = "retry_test_job"
+            job.status = "downloading"
+            dm.jobs[job.id] = job
+
+            # 영구적이지 않은 네트워크 오류 검사
+            self.assertTrue(dm._is_retryable_error(requests.exceptions.ChunkedEncodingError("broken stream")))
+            self.assertTrue(dm._is_retryable_error(ConnectionResetError("reset by peer")))
+
+            # 영구 오류는 재시도 불가 검사
+            self.assertFalse(dm._is_retryable_error("404 Not Found"))
+            self.assertFalse(dm._is_retryable_error("비밀번호가 올바르지 않습니다"))
+            self.assertFalse(dm._is_retryable_error(RuntimeError("internal syntax bug")))
+
+            # 수동 재시도 시 retry_count 리셋 검증
+            job.retry_count = 2
+            job.status = "failed"
+            self.assertTrue(dm.retry_job(job.id))
+            self.assertEqual(job.retry_count, 0)
+
 if __name__ == "__main__":
     unittest.main()
