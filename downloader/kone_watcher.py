@@ -100,7 +100,7 @@ class KoneWatcher:
         self._running = False
         self._is_checking = False
 
-        self._seen_posts: set[str] = set()
+        self._seen_posts: dict[str, None] = {}
         self._last_check_time: float = 0.0
         self._recent_logs: list[dict] = []
         self._last_checked_post: dict | None = None
@@ -140,14 +140,14 @@ class KoneWatcher:
                     with open(SEEN_POSTS_FILE, encoding="utf-8") as f:
                         data = json.load(f)
                     if isinstance(data, list):
-                        self._seen_posts = set(data)
+                        self._seen_posts = {str(k): None for k in data if k}
                         logger.info(
                             "Kone.gg 이전 확인 게시글 %d개 로드 완료",
                             len(self._seen_posts),
                         )
                 except Exception as e:
                     logger.warning("Kone.gg 확인 완료 목록 로드 실패: %s", e)
-                    self._seen_posts = set()
+                    self._seen_posts = {}
 
             state_file = self._get_state_file()
             if state_file.exists():
@@ -184,7 +184,10 @@ class KoneWatcher:
     def _save_seen_posts(self):
         """확인 완료 게시글 ID 목록 및 감시 상태를 안전하게 파일로 저장합니다."""
         with self._lock:
-            posts_list = list(self._seen_posts)[-MAX_SEEN_CACHE:]
+            if len(self._seen_posts) > MAX_SEEN_CACHE:
+                keys_to_keep = list(self._seen_posts.keys())[-MAX_SEEN_CACHE:]
+                self._seen_posts = {k: None for k in keys_to_keep}
+            posts_list = list(self._seen_posts.keys())
             temp_path = None
             try:
                 with tempfile.NamedTemporaryFile(
@@ -273,24 +276,31 @@ class KoneWatcher:
 
     def _run_loop(self, stop_event):
         """지정된 주기마다 게시판을 확인하는 스레드 루프."""
-        while not stop_event.is_set():
-            settings = self.settings_getter()
-            if not settings.get("kone_auto_check", False):
-                break
+        try:
+            while not stop_event.is_set():
+                settings = self.settings_getter()
+                if not settings.get("kone_auto_check", False):
+                    break
 
-            interval = int(settings.get("kone_check_interval_sec", 180))
-            try:
-                self.check_board(is_manual=False)
-            except Exception as e:
-                logger.error("Kone.gg 게시판 자동 확인 중 오류: %s", e, exc_info=True)
+                try:
+                    interval = int(settings.get("kone_check_interval_sec", 180))
+                except (ValueError, TypeError):
+                    interval = 180
 
-            # 주기만큼 대기 (종료 이벤트 수신 시 즉시 탈출)
-            if stop_event.wait(timeout=max(30, interval)):
-                break
+                try:
+                    self.check_board(is_manual=False)
+                except Exception as e:
+                    logger.error("Kone.gg 게시판 자동 확인 중 오류: %s", e, exc_info=True)
 
-        with self._lock:
-            if self._stop_event is stop_event:
-                self._running = False
+                # 주기만큼 대기 (종료 이벤트 수신 시 즉시 탈출)
+                if stop_event.wait(timeout=max(30, interval)):
+                    break
+        except Exception as e:
+            logger.critical("Kone.gg 감시 스레드 루프 예기치 않은 오류: %s", e, exc_info=True)
+        finally:
+            with self._lock:
+                if self._stop_event is stop_event:
+                    self._running = False
 
     def check_board(self, is_manual: bool = False) -> dict:
         """
@@ -417,7 +427,7 @@ class KoneWatcher:
             # 현재 게시판의 글들을 '이미 확인 완료'로 시딩(기록)합니다.
             if not self._seen_posts and not is_manual:
                 for p in found_posts:
-                    self._seen_posts.add(p["id"])
+                    self._seen_posts[p["id"]] = None
                 for p in reversed((non_notice_posts or found_posts)[:5]):
                     st_code, st_msg, link_cnt, cand_urls = (
                         self._inspect_post_history_status(p, headers)
@@ -571,7 +581,7 @@ class KoneWatcher:
 
                     # 게시글 확인 완료 기록 및 최신 감시 기준점 갱신
                     with self._lock:
-                        self._seen_posts.add(post_id)
+                        self._seen_posts[post_id] = None
                         if not post.get("is_notice"):
                             self._last_checked_post = {
                                 "id": post_id,
@@ -811,9 +821,9 @@ class KoneWatcher:
         target_ids = set(regular_ids[:recheck_latest_count])
         with self._lock:
             for pid in seen_in_page:
-                self._seen_posts.add(pid)
+                self._seen_posts[pid] = None
             for pid in target_ids:
-                self._seen_posts.discard(pid)
+                self._seen_posts.pop(pid, None)
         return self.check_board(is_manual=True)
 
     def _inspect_post_history_status(

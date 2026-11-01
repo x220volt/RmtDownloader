@@ -211,6 +211,14 @@ class TorrentDownloadTask:
                     pass
 
     def run(self) -> dict:
+        with self._lock:
+            if self._is_stopped:
+                return {
+                    "success": False,
+                    "status": "paused" if self._is_paused else "cancelled",
+                    "message": "다운로드가 시작 전 중지되었습니다.",
+                }
+
         os.makedirs(self.dest_dir, exist_ok=True)
 
         try:
@@ -238,6 +246,7 @@ class TorrentDownloadTask:
             "--console-log-level=notice",
             "--auto-file-renaming=false",
             "--allow-overwrite=true",
+            "--",
             self.source,
         ]
 
@@ -257,6 +266,12 @@ class TorrentDownloadTask:
                 errors="replace",
                 creationflags=creationflags,
             )
+            with self._lock:
+                if self._is_stopped:
+                    try:
+                        self._process.terminate()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.exception(f"aria2c 프로세스 실행 실패: {e}")
             return {
@@ -280,6 +295,12 @@ class TorrentDownloadTask:
         try:
             for raw_line in iter(proc_stdout.readline, ""):
                 if self._is_stopped:
+                    with self._lock:
+                        if self._process and self._process.poll() is None:
+                            try:
+                                self._process.terminate()
+                            except Exception:
+                                pass
                     break
                 line = raw_line.strip()
                 if not line:
@@ -316,13 +337,42 @@ class TorrentDownloadTask:
                             eta_seconds=parsed["eta_seconds"],
                         )
 
-            proc_stdout.close()
-            ret = self._process.wait()
+            try:
+                proc_stdout.close()
+            except Exception:
+                pass
+
+            try:
+                ret = self._process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                if self._process.poll() is None:
+                    try:
+                        self._process.kill()
+                    except Exception:
+                        pass
+                ret = self._process.wait()
         except Exception as e:
             logger.exception(f"토렌트 스트림 처리 중 오류: {e}")
             if self._process and self._process.poll() is None:
-                self._process.kill()
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=5)
+                except Exception:
+                    try:
+                        self._process.kill()
+                    except Exception:
+                        pass
             return {"success": False, "status": "failed", "error": str(e)}
+        finally:
+            if self._process and self._process.poll() is None:
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=3)
+                except Exception:
+                    try:
+                        self._process.kill()
+                    except Exception:
+                        pass
 
         if self._is_stopped:
             if self._is_paused:

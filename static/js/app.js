@@ -455,6 +455,15 @@ function getDomainFromUrl(url) {
   }
 }
 
+function safeLinkUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (/^(https?:\/\/|magnet:\?)/i.test(trimmed)) {
+    return trimmed;
+  }
+  return '';
+}
+
 function escapeJsString(str) {
   return String(str || '')
     .replace(/\\/g, '\\\\')
@@ -482,6 +491,16 @@ window.copyTextToClipboard = async function (text, btn) {
   }
 };
 
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-copy-url]');
+  if (btn) {
+    const text = btn.getAttribute('data-copy-url');
+    if (text) {
+      window.copyTextToClipboard(text, btn);
+    }
+  }
+});
+
 function createJobCard(job) {
   const card = document.createElement('div');
   card.className = `job-item status-${job.status}`;
@@ -495,7 +514,8 @@ function createJobCard(job) {
 
   // 출처 정보 및 링크
   const displaySource = job.source_title || (job.source_url ? getDomainFromUrl(job.source_url) : '');
-  const sourceHref = job.source_url || job.referer || '';
+  const sourceHref = safeLinkUrl(job.source_url || job.referer || '');
+  const safeOriginalUrl = safeLinkUrl(job.original_url);
 
   // 서브폴더명 추출
   let subfolderName = '';
@@ -543,8 +563,8 @@ function createJobCard(job) {
       <span class="job-filename" title="${escapeHtml(job.filename)}">${escapeHtml(job.filename)}</span>
       ${job.original_url ? `
         <div class="job-url-sub">
-          <a href="${escapeHtml(job.original_url)}" target="_blank" rel="noopener noreferrer" class="job-url-link" title="다운로드 주소: ${escapeHtml(job.original_url)}">🔗 ${escapeHtml(job.original_url)}</a>
-          <button type="button" class="btn-copy-url" onclick="window.copyTextToClipboard('${escapeJsString(job.original_url)}', this)" title="다운로드 링크 복사">📋</button>
+          ${safeOriginalUrl ? `<a href="${escapeHtml(safeOriginalUrl)}" target="_blank" rel="noopener noreferrer" class="job-url-link" title="다운로드 주소: ${escapeHtml(job.original_url)}">🔗 ${escapeHtml(job.original_url)}</a>` : `<span class="job-url-link" title="다운로드 주소: ${escapeHtml(job.original_url)}">🔗 ${escapeHtml(job.original_url)}</span>`}
+          <button type="button" class="btn-copy-url" data-copy-url="${escapeHtml(job.original_url)}" title="다운로드 링크 복사">📋</button>
         </div>
       ` : ''}
     </div>
@@ -586,8 +606,8 @@ function createJobCard(job) {
         ${job.original_url ? `
           <div class="job-error-link-row">
             <span class="error-link-label">요청 링크:</span>
-            <a href="${escapeHtml(job.original_url)}" target="_blank" rel="noopener noreferrer" class="error-url-link" title="${escapeHtml(job.original_url)}">${escapeHtml(job.original_url)} ↗</a>
-            <button type="button" class="btn-copy-mini" onclick="window.copyTextToClipboard('${escapeJsString(job.original_url)}', this)" title="요청 링크 복사">📋 복사</button>
+            ${safeOriginalUrl ? `<a href="${escapeHtml(safeOriginalUrl)}" target="_blank" rel="noopener noreferrer" class="error-url-link" title="${escapeHtml(job.original_url)}">${escapeHtml(job.original_url)} ↗</a>` : `<span class="error-url-link" title="${escapeHtml(job.original_url)}">${escapeHtml(job.original_url)}</span>`}
+            <button type="button" class="btn-copy-mini" data-copy-url="${escapeHtml(job.original_url)}" title="요청 링크 복사">📋 복사</button>
           </div>
         ` : ''}
         ${(sourceHref && sourceHref !== job.original_url) ? `

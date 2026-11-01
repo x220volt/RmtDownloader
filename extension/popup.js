@@ -418,7 +418,10 @@ async function setStorageConfig(data) {
   } catch (e) {}
   try {
     if (chrome.storage && chrome.storage.sync) {
-      chrome.storage.sync.set(data);
+      const syncData = Object.assign({}, data);
+      delete syncData.password;
+      chrome.storage.sync.set(syncData);
+      chrome.storage.sync.remove("password");
     }
   } catch (e) {}
 }

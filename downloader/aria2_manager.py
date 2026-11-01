@@ -5,6 +5,8 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
+import threading
 import zipfile
 from pathlib import Path
 
@@ -13,6 +15,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 ARIA2_DOWNLOAD_URL = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+_aria2_lock = threading.Lock()
 
 
 def get_aria2_path() -> str:
@@ -62,22 +65,37 @@ def get_aria2_path() -> str:
 
 def ensure_aria2c(target_path: str) -> str:
     """지정된 위치에 aria2c.exe가 없으면 공식 GitHub 릴리즈에서 다운로드하여 설치합니다."""
-    if os.path.isfile(target_path):
-        return target_path
+    with _aria2_lock:
+        if os.path.isfile(target_path):
+            return target_path
 
-    target = Path(target_path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+        target = Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"aria2c 실행 파일이 없어 다운로드를 시작합니다: {ARIA2_DOWNLOAD_URL}")
-    resp = requests.get(ARIA2_DOWNLOAD_URL, timeout=30)
-    resp.raise_for_status()
+        logger.info(f"aria2c 실행 파일이 없어 다운로드를 시작합니다: {ARIA2_DOWNLOAD_URL}")
+        resp = requests.get(ARIA2_DOWNLOAD_URL, timeout=30)
+        resp.raise_for_status()
 
-    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-        for name in z.namelist():
-            if name.endswith("aria2c.exe"):
-                with open(target, "wb") as f:
-                    f.write(z.read(name))
-                logger.info(f"aria2c.exe 압축 해제 및 설치 완료: {target}")
-                return str(target)
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+            for name in z.namelist():
+                if name.endswith("aria2c.exe"):
+                    temp_file = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            dir=str(target.parent),
+                            delete=False,
+                            suffix=".tmp",
+                        ) as tf:
+                            temp_file = tf.name
+                            tf.write(z.read(name))
+                        os.replace(temp_file, target)
+                        logger.info(f"aria2c.exe 압축 해제 및 설치 완료: {target}")
+                        return str(target)
+                    finally:
+                        if temp_file and os.path.exists(temp_file):
+                            try:
+                                os.remove(temp_file)
+                            except OSError:
+                                pass
 
-    raise ValueError("다운로드한 아카이브에서 aria2c.exe를 찾을 수 없습니다.")
+        raise ValueError("다운로드한 아카이브에서 aria2c.exe를 찾을 수 없습니다.")

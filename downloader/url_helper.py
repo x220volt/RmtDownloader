@@ -1,9 +1,11 @@
 """URL 및 Base64 인코딩 링크 처리 유틸리티 모듈."""
 
 import base64
+import ipaddress
 import logging
 import os
 import re
+import socket
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -59,11 +61,62 @@ def is_shortened_url(url: str) -> bool:
         return False
 
 
+def is_safe_public_url(url: str) -> bool:
+    """URL이 로컬/사설망(SSRF 공격) 주소가 아닌 유효한 http/https 주소인지 검증합니다."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        if scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        hostname_clean = hostname.strip("[]").lower()
+        if hostname_clean in ("localhost", "0.0.0.0", "127.0.0.1", "::1"):
+            return False
+
+        try:
+            ip = ipaddress.ip_address(hostname_clean)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_unspecified
+            ):
+                return False
+        except ValueError:
+            # 도메인 네임 해석 후 IP 검증 (공격자가 127.0.0.1로 매핑된 도메인을 사용하는 DNS Rebinding 방지)
+            try:
+                addr_info = socket.getaddrinfo(hostname_clean, None)
+                for item in addr_info:
+                    resolved_ip_str = item[4][0]
+                    ip = ipaddress.ip_address(resolved_ip_str)
+                    if (
+                        ip.is_private
+                        or ip.is_loopback
+                        or ip.is_link_local
+                        or ip.is_reserved
+                        or ip.is_unspecified
+                    ):
+                        return False
+            except Exception:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def unshorten_url(url: str, timeout: int = 10) -> str:
     """단축 URL 또는 리다이렉트 링크의 최종 목적지 URL을 안전하게 조회합니다."""
     if not url or not isinstance(url, str):
         return url
     if not is_shortened_url(url):
+        return url
+    if not is_safe_public_url(url):
+        logger.warning(f"사설망 또는 안전하지 않은 단축 URL 전개 차단: {url}")
         return url
     try:
         headers = {
@@ -75,6 +128,11 @@ def unshorten_url(url: str, timeout: int = 10) -> str:
         ) as resp:
             final_u = resp.url
             if final_u and final_u != url:
+                if not is_safe_public_url(final_u):
+                    logger.warning(
+                        f"단축 URL이 사설망 주소로 리다이렉트되어 차단됨: {final_u}"
+                    )
+                    return url
                 logger.info(f"단축 URL 전개 성공: {url} -> {final_u}")
                 return final_u
     except Exception as e:

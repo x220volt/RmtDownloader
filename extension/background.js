@@ -70,12 +70,13 @@ async function sendToServer(url, referer = "") {
       );
     }
     if ((!config || !config.serverUrl) && chrome.storage && chrome.storage.sync) {
-      config = await new Promise((res) =>
-        chrome.storage.sync.get(["serverUrl", "username", "password", "capturePage"], (items) => {
+      const syncItems = await new Promise((res) =>
+        chrome.storage.sync.get(["serverUrl", "username", "capturePage"], (items) => {
           void chrome.runtime.lastError;
           res(items || {});
         })
       );
+      config = Object.assign({}, syncItems || {}, config || {});
     }
   } catch (e) {}
 
@@ -113,6 +114,7 @@ async function sendToServer(url, referer = "") {
           "X-Auth-Password": config.password || "",
         },
         body: JSON.stringify(payload),
+        signal: (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
       });
 
       const data = await res.json().catch(() => ({}));

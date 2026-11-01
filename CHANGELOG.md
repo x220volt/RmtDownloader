@@ -4,6 +4,28 @@
 
 ---
 
+## [v0.1.40] - 2026-11-01
+
+### 🛡️ 전체 소스코드 보안 강화 및 숨은 결함 리팩토링 (Security & Bug Fixes)
+* **비트토렌트(aria2c) 프로세스 누수 및 스레드 무한 대기 방지 (`downloader/torrent_engine.py`)**:
+  * 다운로드 시작 직후 또는 초기화 중 취소/일시중지 시 aria2c 프로세스가 종료되지 않아 `wait()`에서 스레드가 정체되던 현상 해결.
+  * 커맨드라인 옵션 주입 방지를 위한 `--` 구분자 적용 및 프로세스 종료 대기 타임아웃(10초) 적용.
+* **aria2c 실행 파일 원자적(Atomic) 설치 (`downloader/aria2_manager.py`)**:
+  * 다중 스레드 동시 다운로드 시 파일 충돌 방지를 위한 스레드 락 적용 및 `.tmp` 파일 생성 후 `os.replace` 교체로 실행 바이너리 손상 방지.
+* **Kone.gg 감시 캐시 순서 보존 및 스레드 안정화 (`downloader/kone_watcher.py`)**:
+  * 비순서형 `set` 슬라이싱으로 인해 최신 확인 글이 유실되어 중복 다운로드가 발생하던 결함을 순서 보장 `dict` 구조로 전면 리팩토링.
+  * 감시 주기 파싱 오류 대비 안전 fallback 및 예외 시 워처 스레드 상태 초기화 보장.
+* **단축 URL 전개 SSRF(Server-Side Request Forgery) 방어 (`downloader/url_helper.py`)**:
+  * 단축 URL 및 리다이렉트가 사설망/로컬 호스트(127.0.0.1, 10.x, 192.168.x 등)나 DNS Rebinding으로 연결되는 것을 사전에 검증 및 차단.
+* **웹 대시보드 XSS 취약점 제거 (`static/js/app.js`)**:
+  * 인라인 `onclick` 이벤트 내 문자열 이스케이프 우회 취약점을 제거하고 `data-copy-url` 이벤트 위임 방식으로 개선.
+  * 허용된 안전 스킴(`http://`, `https://`, `magnet:?`) 외의 위험한 URI(`javascript:` 등) 렌더링 원천 차단.
+* **브라우저 확장 프로그램 자격증명 보안 강화 (`extension/popup.js`, `extension/background.js`)**:
+  * 비밀번호가 `chrome.storage.sync`를 통해 Google 클라우드 계정으로 동기화되지 않도록 로컬 저장소(`chrome.storage.local`)에만 격리 보관.
+  * 백그라운드 서비스 워커의 `fetch` 통신에 타임아웃(`AbortSignal.timeout(8000)`)을 부여하여 서버 무응답 시 서비스 워커 정체 방지.
+
+---
+
 ## [v0.1.39] - 2026-10-31
 
 ### 🔄 원클릭 자가 업데이트 프로세스 재시작 결함 수정 (`app.py`)
