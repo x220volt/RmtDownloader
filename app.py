@@ -1375,6 +1375,8 @@ def get_settings():
             "check_duplicate_url": s.get("check_duplicate_url", True),
             "capture_source_page": s.get("capture_source_page", False),
             "ignore_ssl_certs": s.get("ignore_ssl_certs", False),
+            "aria2_http_enabled": s.get("aria2_http_enabled", False),
+            "aria2_http_split": s.get("aria2_http_split", 8),
             "session_lifetime_days": s.get("session_lifetime_days", 30),
             "api_token": s.get("api_token") or get_or_create_api_token(),
         }
@@ -1485,6 +1487,8 @@ def update_settings():
                 "check_duplicate_url": updated.get("check_duplicate_url"),
                 "capture_source_page": updated.get("capture_source_page", False),
                 "ignore_ssl_certs": updated.get("ignore_ssl_certs", False),
+                "aria2_http_enabled": updated.get("aria2_http_enabled", False),
+                "aria2_http_split": updated.get("aria2_http_split", 8),
                 "session_lifetime_days": updated.get("session_lifetime_days", 30),
             },
         }

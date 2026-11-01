@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.41') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.42') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.41') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.42') }}</p>
         </div>
       </div>
 
@@ -377,6 +377,19 @@
 
                 <span class="form-help" style="margin-left: 24px; margin-top: 4px;">네이버 카페, 블로그, 웹서버 등에서 self-signed certificate, 인증서 만료 등으로 링크 분석이나 다운로드가 실패할 때 SSL 인증서 오류를 무시하고 다운로드를 계속합니다.</span>
               </div>
+
+              <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingAria2HttpEnabled" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">⚡ aria2c 고속 분할 다운로드 가속 (HTTP/HTTPS)</span>
+                </label>
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">내장된 aria2c C++ 엔진을 활용하여 파일을 여러 개(기본 8개)의 청크 세그먼트로 동시 분할 다운로드합니다. 해외 호스팅(kio.ac, GoFile, MegaUp 등)의 다운로드 속도를 최대 3~10배 가속합니다.</span>
+                <div id="settingAria2HttpSplitWrapper" style="margin-left: 24px; margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                  <label class="form-label" for="settingAria2HttpSplit" style="margin-bottom: 0; font-size: 0.85rem; color: var(--text-muted);">분할 연결 수 (동시 세그먼트):</label>
+                  <input type="number" id="settingAria2HttpSplit" class="form-input" min="1" max="16" value="8" style="width: 75px; padding: 4px 8px; font-size: 0.85rem;">
+                  <span class="form-help" style="margin: 0;">(1 ~ 16개 연결 권장, 기본 8개)</span>
+                </div>
+              </div>
             </div>
 
             <!-- 본 프로그램 버전 및 업데이트 카드 -->
@@ -390,7 +403,7 @@
               </p>
               <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
                 <div style="font-size: 0.83rem;">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.41') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.42') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -859,6 +872,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.41') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.42') }}"></script>
 </body>
 </html>

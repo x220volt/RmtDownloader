@@ -1256,6 +1256,9 @@ class DownloadManager:
 
 
             task_exc = None
+            use_aria2 = False
+            method = "GET"
+            post_data = None
             try:
                 if resolved.get("task_factory"):
                     task = resolved["task_factory"](job, job.download_dir, on_progress)
@@ -1299,25 +1302,55 @@ class DownloadManager:
                             progress_callback=on_progress,
                         )
                     else:
-                        task = DownloadTask(
-                            url=job.resolved_url,
-                            dest_dir=job.download_dir,
-                            filename=job.filename,
-                            partial_id=job.id,
-                            headers=resolved.get("headers")
-                            or job.options.get("headers"),
-                            cookies=resolved.get("cookies")
-                            or job.options.get("cookies"),
-                            referer=resolved.get("referer")
-                            or job.options.get("referer"),
-                            chunk_size=settings.get("chunk_size_kb", 256) * 1024,
-                            progress_callback=on_progress,
-                            status_callback=on_status,
-                            method=resolved.get("method")
-                            or job.options.get("method", "GET"),
-                            post_data=resolved.get("post_data")
-                            or job.options.get("post_data"),
+                        aria2_http_enabled = settings.get("aria2_http_enabled", False)
+                        aria2_http_split = max(1, min(16, int(settings.get("aria2_http_split", 8))))
+                        method = (resolved.get("method") or job.options.get("method", "GET")).upper()
+                        post_data = resolved.get("post_data") or job.options.get("post_data")
+
+                        use_aria2 = (
+                            aria2_http_enabled
+                            and method == "GET"
+                            and not post_data
+                            and bool(job.resolved_url)
+                            and job.resolved_url.lower().startswith(("http://", "https://"))
                         )
+
+                        if use_aria2:
+                            from .aria2_http_engine import Aria2HttpDownloadTask
+
+                            task = Aria2HttpDownloadTask(
+                                url=job.resolved_url,
+                                dest_dir=job.download_dir,
+                                filename=job.filename,
+                                partial_id=job.id,
+                                headers=resolved.get("headers")
+                                or job.options.get("headers"),
+                                cookies=resolved.get("cookies")
+                                or job.options.get("cookies"),
+                                referer=resolved.get("referer")
+                                or job.options.get("referer"),
+                                split=aria2_http_split,
+                                progress_callback=on_progress,
+                                status_callback=on_status,
+                            )
+                        else:
+                            task = DownloadTask(
+                                url=job.resolved_url,
+                                dest_dir=job.download_dir,
+                                filename=job.filename,
+                                partial_id=job.id,
+                                headers=resolved.get("headers")
+                                or job.options.get("headers"),
+                                cookies=resolved.get("cookies")
+                                or job.options.get("cookies"),
+                                referer=resolved.get("referer")
+                                or job.options.get("referer"),
+                                chunk_size=settings.get("chunk_size_kb", 256) * 1024,
+                                progress_callback=on_progress,
+                                status_callback=on_status,
+                                method=method,
+                                post_data=post_data,
+                            )
                 with self._lock:
                     if self.jobs.get(job_id) is not job or job.status != "downloading":
                         job.thread = None
@@ -1326,6 +1359,41 @@ class DownloadManager:
                     job.task = task
                     self._save_jobs()
                 result = task.run()
+                if not isinstance(result, dict):
+                    raise ValueError("Download task returned an invalid result")
+
+                # aria2c 고속 분할 다운로드 실패 시 표준 DownloadTask로 자동 전환 (Fallback)
+                if (
+                    use_aria2
+                    and result.get("status") == "failed"
+                    and not getattr(task, "_is_stopped", False)
+                ):
+                    logger.warning(
+                        f"[Aria2HTTP] 고속 분할 다운로드 실패 ({result.get('error')}). "
+                        f"파이썬 내장 다운로드 엔진으로 자동 전환(Fallback)합니다: {job.filename or job.resolved_url}"
+                    )
+                    on_status("고속 분할 다운로드 실패 -> 표준 엔진으로 자동 전환 중...")
+                    fallback_task = DownloadTask(
+                        url=job.resolved_url,
+                        dest_dir=job.download_dir,
+                        filename=job.filename,
+                        partial_id=job.id,
+                        headers=resolved.get("headers")
+                        or job.options.get("headers"),
+                        cookies=resolved.get("cookies")
+                        or job.options.get("cookies"),
+                        referer=resolved.get("referer")
+                        or job.options.get("referer"),
+                        chunk_size=settings.get("chunk_size_kb", 256) * 1024,
+                        progress_callback=on_progress,
+                        status_callback=on_status,
+                        method=method,
+                        post_data=post_data,
+                    )
+                    with self._lock:
+                        if self.jobs.get(job_id) is job and job.status == "downloading":
+                            job.task = fallback_task
+                    result = fallback_task.run()
                 if not isinstance(result, dict):
                     raise ValueError("Download task returned an invalid result")
                 # DownloadTask reports failures as results rather than exceptions.

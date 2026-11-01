@@ -193,6 +193,8 @@ def build_pyinstaller_exe(version_tag: str) -> Path:
         "--hidden-import",
         "downloader.aria2_manager",
         "--hidden-import",
+        "downloader.aria2_http_engine",
+        "--hidden-import",
         "downloader.resolvers",
         "--collect-submodules",
         "downloader",

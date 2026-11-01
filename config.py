@@ -14,7 +14,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.41"
+APP_VERSION = "0.1.42"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
 CONFIG_DIR = (
@@ -53,6 +53,8 @@ DEFAULT_SETTINGS = {
     "check_duplicate_url": True,
     "capture_source_page": False,
     "ignore_ssl_certs": False,
+    "aria2_http_enabled": False,
+    "aria2_http_split": 8,
     "session_lifetime_days": 30,
     "secret_key": "",
     "extension_dir": "",
@@ -73,6 +75,7 @@ def validate_settings(settings):
         ("max_concurrent_downloads", 1, 32),
         ("chunk_size_kb", 1, 16384),
         ("kone_check_interval_sec", 30, 86400),
+        ("aria2_http_split", 1, 16),
         ("session_lifetime_days", 1, 365),
     ):
         if key in settings:
@@ -87,6 +90,7 @@ def validate_settings(settings):
         "check_duplicate_url",
         "capture_source_page",
         "ignore_ssl_certs",
+        "aria2_http_enabled",
     ):
         if key in settings and type(settings[key]) is not bool:
             raise ValueError(f"{key}: expected boolean")

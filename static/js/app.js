@@ -1516,6 +1516,10 @@ async function openSettings() {
       if (settingCaptureSourcePage) settingCaptureSourcePage.checked = Boolean(data.capture_source_page);
       const settingIgnoreSslCerts = document.getElementById('settingIgnoreSslCerts');
       if (settingIgnoreSslCerts) settingIgnoreSslCerts.checked = Boolean(data.ignore_ssl_certs);
+      const settingAria2HttpEnabled = document.getElementById('settingAria2HttpEnabled');
+      if (settingAria2HttpEnabled) settingAria2HttpEnabled.checked = Boolean(data.aria2_http_enabled);
+      const settingAria2HttpSplit = document.getElementById('settingAria2HttpSplit');
+      if (settingAria2HttpSplit) settingAria2HttpSplit.value = data.aria2_http_split || 8;
 
       const settingAuthUsername = document.getElementById('settingAuthUsername');
       const settingAuthPassword = document.getElementById('settingAuthPassword');
@@ -1648,6 +1652,10 @@ async function saveSettings(e) {
   if (settingCaptureSourcePage) payload.capture_source_page = settingCaptureSourcePage.checked;
   const settingIgnoreSslCerts = document.getElementById('settingIgnoreSslCerts');
   if (settingIgnoreSslCerts) payload.ignore_ssl_certs = settingIgnoreSslCerts.checked;
+  const settingAria2HttpEnabled = document.getElementById('settingAria2HttpEnabled');
+  if (settingAria2HttpEnabled) payload.aria2_http_enabled = settingAria2HttpEnabled.checked;
+  const settingAria2HttpSplit = document.getElementById('settingAria2HttpSplit');
+  if (settingAria2HttpSplit) payload.aria2_http_split = parseInt(settingAria2HttpSplit.value, 10) || 8;
 
   try {
     const res = await fetch('/api/settings', {
