@@ -715,6 +715,7 @@ function getServiceTagClass(service) {
   if (lower.includes('x-share') || lower.includes('xshare')) return 'badge-xshare';
   if (lower.includes('romsfun')) return 'badge-romsfun';
   if (lower.includes('wowroms')) return 'badge-wowroms';
+  if (lower.includes('planetemu')) return 'badge-planetemu';
   if (lower.includes('rootz')) return 'badge-rootz';
   if (lower.includes('gdrive') || lower.includes('google drive') || lower.includes('google')) return 'badge-gdrive';
   return 'badge-direct';

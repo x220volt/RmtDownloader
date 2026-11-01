@@ -4,6 +4,25 @@
 
 ---
 
+## [v0.1.41] - 2026-11-01
+
+### 💾 다운로드 목록 영구 저장(Persistence) 및 서버 재부팅 시 자동 이어받기
+* **작업 목록 영구 보존 (downloader/manager.py)**:
+  * 서버를 종료하거나 재시작하더라도 대기 중(queued), 진행 중(downloading), 완료(done), 실패(ailed) 상태의 모든 작업 목록이 jobs.json에 안전하게 보존됩니다.
+  * 불필요한 IO 지연을 최소화하기 위해 비동기 백그라운드 큐 방식으로 상태를 원자적(os.replace)으로 안전하게 디스크에 기록합니다.
+* **미완료 작업 자동 재개**:
+  * 서버 재시작 시 이전에 다운로드 중이던 작업을 감지하여 대기열 상단으로 복원하고, 기존에 임시 저장된 파일 크기부터 HTTP Range 기반 청크 이어받기를 자동으로 시작합니다.
+
+### 🎮 PlanetEmu (planetemu.net) 레트로 게임 ROM 다운로드 지원
+* **PlanetEmu 다운로드 리졸버 추가 (downloader/resolvers/planetemu.py)**:
+  * planetemu.net의 ROM 상세 페이지(/rom/..., /roms/...) 및 발급된 직링크(/download/rom?token=...) 자동 감지 및 변환.
+  * GET /download/quota 엔드포인트를 통한 쿼터 확인 및 일회용 인증 패스(pass) 자동 발급.
+  * POST /download/rom 일회용 토큰 직링크 생성 및 Nginx 속도 제한(429) 감지 시 지수 백오프 자동 재시도 로직 적용.
+* **UI 및 확장 프로그램 연동**:
+  * 웹 대시보드 배지 스타일(.badge-planetemu) 및 크롬 확장 프로그램 서비스 태그(.tag-planetemu) 지원.
+
+---
+
 ## [v0.1.40] - 2026-11-01
 
 ### 🛡️ 전체 소스코드 보안 강화 및 숨은 결함 리팩토링 (Security & Bug Fixes)

@@ -566,6 +566,10 @@ body {
   background: rgba(245, 158, 11, 0.2);
   color: #fbbf24;
 }
+.tag-planetemu {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
 .tag-rootz {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;

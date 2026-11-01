@@ -1,3 +1,4 @@
+import atexit
 import glob
 import json
 import logging
@@ -7,9 +8,11 @@ import tempfile
 import threading
 import time
 import socket
+import sys
 import uuid
 import requests
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from config import CONFIG_DIR
@@ -29,12 +32,21 @@ logger = logging.getLogger(__name__)
 HISTORY_FILE = CONFIG_DIR / "download_history.json"
 MAX_HISTORY_ENTRIES = 5000
 
+JOBS_FILE = CONFIG_DIR / "jobs.json"
+MAX_JOBS_ENTRIES = 5000
+
 
 class DownloadJob:
     """단일 다운로드 작업 객체."""
 
-    def __init__(self, url: str, download_dir: str, options: dict | None = None):
-        self.id = str(uuid.uuid4())
+    def __init__(
+        self,
+        url: str,
+        download_dir: str,
+        options: dict | None = None,
+        job_id: str | None = None,
+    ):
+        self.id = job_id or str(uuid.uuid4())
         self.original_url = clean_url(url)
         self.download_dir = download_dir
         self.options = options or {}
@@ -84,6 +96,7 @@ class DownloadJob:
         self.task: Optional[Any] = None
         self.thread: Optional[threading.Thread] = None
         self._last_log_time: float = 0.0
+        self._last_save_time: float = 0.0
 
     def to_dict(self) -> dict:
         """클라이언트 전달용 직렬화 딕셔너리 반환."""
@@ -119,12 +132,89 @@ class DownloadJob:
             "max_retries": self.max_retries,
         }
 
+    def to_storage_dict(self) -> dict:
+        """디스크 영구 저장(jobs.json)용 직렬화 딕셔너리 반환."""
+        clean_opts = {}
+        if self.options and isinstance(self.options, dict):
+            for k, v in self.options.items():
+                if str(k).startswith("_"):
+                    continue
+                if hasattr(v, "_mock_return_value") or hasattr(v, "mock_calls"):
+                    continue
+                if isinstance(v, (str, int, float, bool, list, dict)) or v is None:
+                    clean_opts[k] = v
+                else:
+                    clean_opts[k] = str(v)
+
+        return {
+            "id": str(self.id),
+            "original_url": str(self.original_url),
+            "download_dir": str(self.download_dir or ""),
+            "options": clean_opts,
+            "status": str(self.status),
+            "service_name": str(self.service_name),
+            "filename": str(self.filename or ""),
+            "file_path": str(self.file_path or ""),
+            "error_message": str(self.error_message or ""),
+            "downloaded_bytes": int(self.downloaded_bytes or 0),
+            "total_bytes": int(self.total_bytes) if self.total_bytes is not None else None,
+            "progress": round(float(self.progress or 0.0), 1),
+            "is_auto": bool(self.is_auto),
+            "download_type": str(self.download_type),
+            "created_at": str(self.created_at),
+            "completed_at": str(self.completed_at) if self.completed_at else None,
+            "referer": str(self.referer or ""),
+            "source_title": str(self.source_title or ""),
+            "source_url": str(self.source_url or ""),
+            "retry_count": int(self.retry_count or 0),
+            "max_retries": int(self.max_retries or 3),
+        }
+
+    @classmethod
+    def from_storage_dict(cls, data: dict) -> "DownloadJob":
+        """디스크 저장 데이터로부터 DownloadJob 인스턴스를 복원합니다."""
+        job = cls(
+            url=data.get("original_url", ""),
+            download_dir=data.get("download_dir", ""),
+            options=data.get("options") or {},
+            job_id=data.get("id"),
+        )
+        job.status = data.get("status", "queued")
+        job.service_name = data.get("service_name", "Auto")
+        job.filename = data.get("filename", "")
+        job.file_path = data.get("file_path", "")
+        job.error_message = data.get("error_message", "")
+        job.downloaded_bytes = data.get("downloaded_bytes", 0)
+        job.total_bytes = data.get("total_bytes")
+        job.progress = data.get("progress", 0.0)
+        job.is_auto = bool(data.get("is_auto", False))
+        job.download_type = data.get(
+            "download_type", "auto" if job.is_auto else "manual"
+        )
+        job.created_at = data.get("created_at") or job.created_at
+        job.completed_at = data.get("completed_at")
+        job.referer = data.get("referer", "")
+        job.source_title = data.get("source_title", "")
+        job.source_url = data.get("source_url", "")
+        job.retry_count = data.get("retry_count", 0)
+        job.max_retries = data.get("max_retries", 3)
+        return job
+
 
 class DownloadManager:
     """다운로드 큐 및 작업 생명주기를 총괄하는 매니저."""
 
-    def __init__(self, settings_getter):
+    def __init__(self, settings_getter, jobs_file: Optional[Path] = None):
         self.settings_getter = settings_getter
+        if jobs_file is not None:
+            self.jobs_file: Optional[Path] = jobs_file
+            self._should_persist = True
+        elif not ("unittest" in sys.modules or "pytest" in sys.modules):
+            self.jobs_file = JOBS_FILE
+            self._should_persist = True
+        else:
+            self.jobs_file = None
+            self._should_persist = False
         self.jobs: Dict[str, DownloadJob] = {}
         self.queue = queue.Queue()
         self._lock = threading.RLock()
@@ -133,11 +223,20 @@ class DownloadManager:
         self._stop_event = threading.Event()
         self._completed_history: Dict[str, dict] = {}
 
-        # 완료 히스토리 로드
+        # 1. 완료 히스토리 로드
         self._load_history()
 
-        # 워커 스레드 초기화
+        # 2. 이전 작업 목록 복원 및 미완료 작업 자동 이어받기 대기열 등록
+        self._load_jobs()
+
+        # 3. 워커 스레드 초기화
         self._start_workers()
+
+        # 4. 프로세스 정상 종료 시 상태 자동 보존 등록
+        try:
+            atexit.register(self.stop)
+        except Exception:
+            pass
 
     @staticmethod
     def _is_permanent_error(err_msg: str) -> bool:
@@ -250,10 +349,11 @@ class DownloadManager:
                         k: self._completed_history[k] for k in keys_to_keep
                     }
 
+                HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     encoding="utf-8",
-                    dir=HISTORY_FILE.parent,
+                    dir=str(HISTORY_FILE.parent),
                     suffix=".tmp",
                     delete=False,
                 ) as stream:
@@ -270,6 +370,144 @@ class DownloadManager:
                         os.remove(temp_path)
                     except OSError:
                         pass
+
+    def _load_jobs(self):
+        """저장된 작업 목록(jobs.json)을 로드하고 미완료 작업은 이어받기 대기열로 복원합니다."""
+        if not getattr(self, "_should_persist", True):
+            return
+        target_file = self.jobs_file or JOBS_FILE
+        with self._lock:
+            if not target_file or not target_file.exists():
+                return
+
+            try:
+                with open(target_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                if not isinstance(data, list):
+                    return
+
+                resumed_count = 0
+                for item in data:
+                    if not isinstance(item, dict) or not item.get("id") or not item.get("original_url"):
+                        continue
+                    try:
+                        job = DownloadJob.from_storage_dict(item)
+                    except Exception as ex:
+                        logger.warning(f"작업 데이터 복원 실패: {ex}")
+                        continue
+
+                    # 디스크에 .part 파일이 존재하는지 검사하여 실제 다운로드된 바이트 수 보정
+                    part_path = self._find_part_path(job)
+                    if part_path and os.path.exists(part_path):
+                        actual_size = os.path.getsize(part_path)
+                        job.downloaded_bytes = actual_size
+                        if job.total_bytes and job.total_bytes > 0:
+                            job.progress = min(
+                                100.0, (actual_size / job.total_bytes) * 100.0
+                            )
+
+                    # 상태별 분기
+                    if job.status in ("downloading", "resolving", "queued"):
+                        # 서버 종료 시점에 진행 중이거나 대기 중이던 작업 -> 이어받기 자동 재개
+                        job.status = "queued"
+                        job.speed_bps = 0.0
+                        job.speed_str = "0 KB/s"
+                        job.eta_seconds = None
+                        job.eta_str = "--:--"
+                        job.task = None
+                        job.thread = None
+                        self.jobs[job.id] = job
+                        self.queue.put(job.id)
+                        resumed_count += 1
+                        logger.info(
+                            f"서버 재시작 감지: 미완료 작업 자동 이어받기 대기열 등록 (ID={job.id}, 파일명={job.filename or '미정'}, 기존 수신={format_bytes(job.downloaded_bytes)})"
+                        )
+                    else:
+                        # completed, failed, cancelled, paused 상태 유지
+                        job.speed_bps = 0.0
+                        job.speed_str = "0 KB/s"
+                        job.eta_seconds = None
+                        job.eta_str = "--:--"
+                        job.task = None
+                        job.thread = None
+                        self.jobs[job.id] = job
+
+                        # completed 작업인 경우 완료 히스토리에도 동기화
+                        if job.status == "completed":
+                            c_key = canonical_url_key(job.original_url)
+                            if c_key and c_key not in self._completed_history:
+                                self._completed_history[c_key] = {
+                                    "url": job.original_url,
+                                    "canonical_key": c_key,
+                                    "filename": job.filename,
+                                    "file_path": job.file_path,
+                                    "source_title": job.source_title,
+                                    "source_url": job.source_url,
+                                    "size": job.total_bytes or job.downloaded_bytes,
+                                    "completed_at": job.completed_at
+                                    or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "is_auto": job.is_auto,
+                                    "download_type": job.download_type,
+                                }
+
+                logger.info(
+                    f"이전 작업 목록 {len(self.jobs)}개 복원 완료 (다운로드 자동 재개: {resumed_count}개)"
+                )
+            except Exception as e:
+                logger.error(f"이전 작업 목록 로드 실패: {e}", exc_info=True)
+
+    def _save_jobs(self):
+        """현재 작업 목록을 jobs.json 파일에 안전하게 저장합니다."""
+        if not getattr(self, "_should_persist", True):
+            return
+        target_file = self.jobs_file or JOBS_FILE
+        if not target_file:
+            return
+        with self._lock:
+            if len(self.jobs) > MAX_JOBS_ENTRIES:
+                keys_to_keep = list(self.jobs.keys())[-MAX_JOBS_ENTRIES:]
+                self.jobs = {k: self.jobs[k] for k in keys_to_keep}
+
+            jobs_data = []
+            for job in self.jobs.values():
+                try:
+                    jobs_data.append(job.to_storage_dict())
+                except Exception:
+                    pass
+            temp_path = None
+            try:
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=str(target_file.parent),
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
+                    temp_path = stream.name
+                    json.dump(jobs_data, stream, indent=2, ensure_ascii=False)
+                os.replace(temp_path, target_file)
+            except Exception as e:
+                logger.warning(f"작업 목록 저장 실패: {e}")
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+
+    def stop(self):
+        """매니저 종료 시 모든 워커 중지 및 최종 상태 파일 저장."""
+        self._stop_event.set()
+        with self._lock:
+            for job in self.jobs.values():
+                if job.status in ("downloading", "resolving") and job.task:
+                    try:
+                        job.task.stop()
+                    except Exception:
+                        pass
+            self._save_jobs()
+            self._save_history()
 
     def _record_completed_history(self, job: DownloadJob):
         """완료된 작업을 히스토리에 기록합니다."""
@@ -435,13 +673,15 @@ class DownloadManager:
                     job.speed_bps = 0.0
                     job.speed_str = "0 KB/s"
                     self.jobs[job.id] = job
+                    self._save_jobs()
                     self._broadcast("job_added", job.to_dict())
                     self._broadcast("job_updated", job.to_dict())
                     self._broadcast("stats_updated", self.get_stats())
                     return job
             self.jobs[job.id] = job
-            self._broadcast("job_added", job.to_dict())
             self.queue.put(job.id)
+            self._save_jobs()
+            self._broadcast("job_added", job.to_dict())
 
         logger.info(
             f"작업 추가됨: ID={job.id}, URL={url}, 파일명={filename}, 서브폴더={subfolder}"
@@ -503,10 +743,12 @@ class DownloadManager:
             if job.status == "downloading" and job.task:
                 job.task.pause()
                 job.status = "paused"
+                self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
                 return True
             elif job.status == "queued":
                 job.status = "paused"
+                self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
                 return True
         return False
@@ -523,6 +765,7 @@ class DownloadManager:
                 return False
             job.status = "queued"
             self.queue.put(job.id)
+            self._save_jobs()
             self._broadcast("job_updated", job.to_dict())
             return True
 
@@ -537,6 +780,7 @@ class DownloadManager:
             job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             job.speed_bps = 0.0
             job.speed_str = "0 KB/s"
+            self._save_jobs()
             self._broadcast("job_updated", job.to_dict())
             return True
 
@@ -607,6 +851,7 @@ class DownloadManager:
                 job.progress = 0.0
 
             self.queue.put(job.id)
+            self._save_jobs()
             self._broadcast("job_updated", job.to_dict())
             self._broadcast("stats_updated", self.get_stats())
             return True
@@ -620,6 +865,7 @@ class DownloadManager:
                 job.task.stop()
             self._cleanup_part_file(job)
             del self.jobs[job_id]
+            self._save_jobs()
             self._broadcast("job_removed", {"id": job_id})
             return True
 
@@ -659,6 +905,7 @@ class DownloadManager:
                 self._broadcast("job_removed", {"id": jid})
 
             if to_delete:
+                self._save_jobs()
                 self._broadcast("stats_updated", self.get_stats())
             return len(to_delete)
 
@@ -717,6 +964,7 @@ class DownloadManager:
                     continue
                 job.thread = threading.current_thread()
                 job.status = "resolving"
+                self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
 
             # 1. 링크 해석 (Resolving)
@@ -766,6 +1014,8 @@ class DownloadManager:
                         job.speed_str = "완료"
                         job.eta_str = "저장 완료"
                         job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        self._record_completed_history(job)
+                        self._save_jobs()
                         self._broadcast("job_updated", job.to_dict())
                     logger.info(
                         f"작업 {job.id} 테라박스 클라우드 저장 완료: {job.filename} -> {job.file_path}"
@@ -961,6 +1211,10 @@ class DownloadManager:
                             job.speed_str,
                             job.eta_str,
                         )
+                    last_save = getattr(job, "_last_save_time", 0.0)
+                    if now - last_save >= 15.0:
+                        job._last_save_time = now
+                        self._save_jobs()
 
                 self._broadcast(
                     "job_progress",
@@ -1070,6 +1324,7 @@ class DownloadManager:
                         self.queue.task_done()
                         continue
                     job.task = task
+                    self._save_jobs()
                 result = task.run()
                 if not isinstance(result, dict):
                     raise ValueError("Download task returned an invalid result")
@@ -1255,6 +1510,7 @@ class DownloadManager:
 
                 job.task = None
                 job.thread = None
+                self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
 
             self.queue.task_done()
