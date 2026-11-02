@@ -200,6 +200,7 @@ class RomspureResolverTests(unittest.TestCase):
     def test_addon_registration(self):
         addon = addon_registry.get_addon("romspure")
         self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.name, "Romspure")
         self.assertIn("romspure.cc", addon.domains)
         self.assertIsInstance(addon.create_resolver(), RomspureResolver)

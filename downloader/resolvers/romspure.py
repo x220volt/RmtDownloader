@@ -148,7 +148,7 @@ class RomspureResolver(BaseResolver):
         # DOM 태그 또는 URL에서 post_id 및 index 추출
         post_id = ""
         index = ""
-        widget = soup.find(attrs={"data-download-ajax": True})
+        widget = soup.select_one("[data-download-ajax]")
         if widget:
             post_id = str(widget.get("data-post-id") or "").strip()
             index = str(widget.get("data-index") or "").strip()

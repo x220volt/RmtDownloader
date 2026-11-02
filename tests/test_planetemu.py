@@ -145,6 +145,7 @@ class PlanetEmuResolverTests(unittest.TestCase):
     def test_addon_registration(self):
         addon = addon_registry.get_addon("planetemu")
         self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.name, "PlanetEmu")
         self.assertIn("planetemu.net", addon.domains)
         self.assertIsInstance(addon.create_resolver(), PlanetEmuResolver)
