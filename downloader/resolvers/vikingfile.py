@@ -7,7 +7,7 @@ Cloudflare Turnstile 보호를 DrissionPage(로컬 스텔스 브라우저) 또�
 import logging
 import os
 import time
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import unquote, urljoin, urlparse
 
 import requests
@@ -359,7 +359,7 @@ class VikingFileResolver(BaseResolver):
             parsed_final = urlparse(final_url)
             filename = unquote(os.path.basename(parsed_final.path))
 
-        res_dict = {
+        res_dict: dict[str, Any] = {
             "url": final_url,
             "filename": filename,
             "headers": {"User-Agent": VIKINGFILE_USER_AGENT},

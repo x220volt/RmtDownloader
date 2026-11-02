@@ -6,11 +6,11 @@ import logging
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import time
 import zipfile
-import shutil
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
@@ -365,7 +365,9 @@ def server_storage():
     """서버 저장소 및 다운로드 폴더 용량 정보를 반환합니다."""
     force = request.args.get("refresh", "").lower() in ("1", "true")
     settings = load_settings()
-    info = get_storage_info(settings.get("download_dir"), force_refresh=force)
+    d_dir = settings.get("download_dir")
+    download_dir_str = d_dir if isinstance(d_dir, str) else None
+    info = get_storage_info(download_dir_str, force_refresh=force)
     return jsonify(info)
 
 
@@ -378,7 +380,9 @@ def get_info():
     port = settings.get("port", 7971)
     connect_urls = [f"http://{ip}:{port}" for ip in local_ips]
     api_token = get_or_create_api_token()
-    storage = get_storage_info(settings.get("download_dir"))
+    d_dir = settings.get("download_dir")
+    download_dir_str = d_dir if isinstance(d_dir, str) else None
+    storage = get_storage_info(download_dir_str)
     return jsonify(
         {
             "status": "online",
@@ -911,7 +915,7 @@ def _get_extension_dir() -> Path:
     (주의: PyInstaller 번들 임시 폴더인 _MEIxxxxxx는 대상에서 영구 배제)
     """
     settings = load_settings()
-    configured_dir = (settings.get("extension_dir") or "").strip()
+    configured_dir = str(settings.get("extension_dir") or "").strip()
     if configured_dir:
         cand = Path(configured_dir).resolve()
         if cand.is_dir() and not _is_mei_dir(cand) and (cand / "manifest.json").exists():
@@ -1112,8 +1116,8 @@ def is_newer_version(current_ver: Optional[str], target_ver: Optional[str]) -> b
     """SemVer 버전 비교 (예: 'v0.1.34' vs 'v0.1.35'). target_ver가 더 크면 True."""
     if not target_ver:
         return False
-    c_clean = re.sub(r"^[vV]", "", str(current_ver).strip())
-    t_clean = re.sub(r"^[vV]", "", str(target_ver).strip())
+    c_clean = re.sub(r"^[vV]", "", str(current_ver or "").strip())
+    t_clean = re.sub(r"^[vV]", "", target_ver.strip())
     if not t_clean or c_clean == t_clean:
         return False
 

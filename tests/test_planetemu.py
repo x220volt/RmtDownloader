@@ -31,7 +31,8 @@ class PlanetEmuResolverTests(unittest.TestCase):
             None,
         ]
         for url in invalid_urls:
-            self.assertFalse(self.resolver.can_handle(url), f"Should not handle: {url}")
+            target = url or ""
+            self.assertFalse(self.resolver.can_handle(target), f"Should not handle: {url}")
 
     def test_resolve_direct_token_url(self):
         token_url = "https://www.planetemu.net/download/rom?token=42833f0fd22b5093d0e06a404c2d302c"

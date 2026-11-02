@@ -165,7 +165,7 @@ def load_settings():
                 "Invalid settings file; using defaults", exc_info=True
             )
             settings = dict(DEFAULT_SETTINGS)
-        configure_ssl_verification(settings.get("ignore_ssl_certs", False))
+        configure_ssl_verification(bool(settings.get("ignore_ssl_certs", False)))
         return settings
 
 
@@ -215,7 +215,7 @@ def save_settings(new_settings):
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
-        configure_ssl_verification(settings.get("ignore_ssl_certs", False))
+        configure_ssl_verification(bool(settings.get("ignore_ssl_certs", False)))
         return settings
 
 

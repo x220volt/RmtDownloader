@@ -250,7 +250,16 @@ class PlanetEmuResolver(BaseResolver):
 
         logger.info(f"[PlanetEmu] 다운로드 직링크 생성 완료: {token_url}")
 
-        cookies_str = "; ".join([f"{c.name}={c.value}" for c in session.cookies]) or None
+        cookie_parts = []
+        if hasattr(session.cookies, "items"):
+            for k, v in session.cookies.items():
+                cookie_parts.append(f"{k}={v}")
+        elif isinstance(session.cookies, list):
+            for c in session.cookies:
+                c_name = getattr(c, "name", str(c))
+                c_val = getattr(c, "value", "")
+                cookie_parts.append(f"{c_name}={c_val}")
+        cookies_str = "; ".join(cookie_parts) or None
 
         return {
             "url": token_url,

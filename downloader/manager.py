@@ -1467,8 +1467,8 @@ class DownloadManager:
                 final_status = result.get("status")
                 if final_status == "completed":
                     job.status = "completed"
-                    job.filename = result.get("filename", job.filename)
-                    job.file_path = result.get("file_path", "")
+                    job.filename = str(result.get("filename") or job.filename)
+                    job.file_path = str(result.get("file_path") or "")
                     job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     job.speed_bps = 0.0
                     job.speed_str = "0 KB/s"
@@ -1484,7 +1484,7 @@ class DownloadManager:
                     job.speed_bps = 0.0
                     job.speed_str = "0 KB/s"
                 else:
-                    err_msg = result.get("error", "다운로드 실패")
+                    err_msg = str(result.get("error") or "다운로드 실패")
                     is_retryable = self._is_retryable_error(task_exc if task_exc is not None else err_msg)
                     can_retry = (
                         is_retryable
@@ -1568,9 +1568,9 @@ class DownloadManager:
                             "downloaded_bytes" in result
                             and result["downloaded_bytes"] is not None
                         ):
-                            job.downloaded_bytes = result["downloaded_bytes"]
+                            job.downloaded_bytes = int(result["downloaded_bytes"])
                         if "total_bytes" in result and result["total_bytes"] is not None:
-                            job.total_bytes = result["total_bytes"]
+                            job.total_bytes = int(result["total_bytes"])
                         if job.total_bytes and job.total_bytes > 0:
                             job.progress = min(
                                 100.0, (job.downloaded_bytes / job.total_bytes) * 100.0

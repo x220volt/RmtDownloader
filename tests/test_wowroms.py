@@ -32,7 +32,8 @@ class WowromsResolverTests(unittest.TestCase):
             None,
         ]
         for url in invalid_urls:
-            self.assertFalse(self.resolver.can_handle(url), f"Should not handle {url}")
+            target = url or ""
+            self.assertFalse(self.resolver.can_handle(target), f"Should not handle {url}")
 
     @patch("downloader.resolvers.wowroms.requests.Session")
     def test_resolve_direct_download_page(self, mock_session_cls):
