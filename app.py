@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import zipfile
+import shutil
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
@@ -289,6 +290,85 @@ def web_manifest():
     )
 
 
+_storage_cache: dict = {"data": None, "expires_at": 0.0}
+
+
+def get_storage_info(download_dir: str | None = None, force_refresh: bool = False) -> dict:
+    """다운로드 저장 디렉터리의 디스크 사용량 및 보관 파일 크기/개수 정보를 반환합니다."""
+    settings = load_settings()
+    target_dir = download_dir or settings.get("download_dir") or os.path.expanduser("~/Downloads/RemoteDownloads")
+    target_dir = os.path.abspath(os.path.expanduser(str(target_dir)))
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"저장 폴더 생성/확인 실패 ({target_dir}): {e}")
+
+    now = time.time()
+    cached = _storage_cache["data"]
+    if (
+        not force_refresh
+        and cached
+        and cached.get("download_dir") == target_dir
+        and now < _storage_cache["expires_at"]
+    ):
+        # 디스크 용량은 즉시 갱신하고 폴더 스캔 결과는 캐시 유지
+        try:
+            total, used, free = shutil.disk_usage(target_dir)
+            cached["disk_total"] = total
+            cached["disk_used"] = used
+            cached["disk_free"] = free
+            cached["disk_percent"] = round((used / total * 100), 1) if total > 0 else 0.0
+            return cached
+        except Exception:
+            return cached
+
+    total, used, free = 0, 0, 0
+    try:
+        total, used, free = shutil.disk_usage(target_dir)
+    except Exception as e:
+        logger.warning(f"디스크 용량 확인 실패 ({target_dir}): {e}")
+
+    folder_size = 0
+    file_count = 0
+    try:
+        if os.path.exists(target_dir):
+            for root, dirs, files in os.walk(target_dir):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        folder_size += os.path.getsize(fp)
+                        file_count += 1
+                    except OSError:
+                        pass
+    except Exception as e:
+        logger.warning(f"저장 폴더 크기 확인 실패 ({target_dir}): {e}")
+
+    disk_percent = round((used / total * 100), 1) if total > 0 else 0.0
+
+    result = {
+        "download_dir": target_dir,
+        "disk_total": total,
+        "disk_used": used,
+        "disk_free": free,
+        "disk_percent": disk_percent,
+        "folder_size": folder_size,
+        "file_count": file_count,
+    }
+    _storage_cache["data"] = dict(result)
+    _storage_cache["expires_at"] = now + 15.0  # 15초 유효 캐시
+    return result
+
+
+@app.route("/api/server/storage", methods=["GET"])
+@login_required
+def server_storage():
+    """서버 저장소 및 다운로드 폴더 용량 정보를 반환합니다."""
+    force = request.args.get("refresh", "").lower() in ("1", "true")
+    settings = load_settings()
+    info = get_storage_info(settings.get("download_dir"), force_refresh=force)
+    return jsonify(info)
+
+
 @app.route("/api/info", methods=["GET"])
 @login_required
 def get_info():
@@ -298,6 +378,7 @@ def get_info():
     port = settings.get("port", 7971)
     connect_urls = [f"http://{ip}:{port}" for ip in local_ips]
     api_token = get_or_create_api_token()
+    storage = get_storage_info(settings.get("download_dir"))
     return jsonify(
         {
             "status": "online",
@@ -307,6 +388,7 @@ def get_info():
             "port": port,
             "connect_urls": connect_urls,
             "download_dir": settings.get("download_dir"),
+            "storage": storage,
             "terabox_mode": settings.get("terabox_mode", "download"),
             "terabox_password": settings.get("terabox_password", ""),
             "auth_enabled": settings.get("auth_enabled", True),

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.42') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.43') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.42') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.43') }}</p>
         </div>
       </div>
 
@@ -193,12 +193,32 @@
 
 
         <div class="form-footer">
-          <div class="save-path-hint" id="savePathHint">
+          <div class="save-path-wrapper">
+            <div class="save-path-hint" id="savePathHint">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
-            저장 위치: <span id="downloadDirText">로딩 중...</span>
+            <span>저장 위치: <span id="downloadDirText">로딩 중...</span></span>
           </div>
+          <div class="storage-info-row" id="storageInfoRow" title="서버 디스크 여유 공간 및 저장 폴더 보관 용량">
+            <div class="storage-stat-pill" title="서버 디스크 여유 공간">
+              <span class="storage-icon">💾</span>
+              <span class="storage-label">여유:</span>
+              <strong class="storage-val" id="storageFreeText">-</strong>
+              <span class="storage-sub" id="storageTotalText">/ 전체 -</span>
+            </div>
+            <div class="storage-stat-pill folder" title="다운로드 폴더에 보관된 파일 용량">
+              <span class="storage-icon">📁</span>
+              <span class="storage-label">폴더:</span>
+              <strong class="storage-val" id="storageFolderText">-</strong>
+              <span class="storage-sub" id="storageFileCountText">(-개)</span>
+            </div>
+            <div class="storage-mini-meter" title="디스크 사용률">
+              <div class="storage-meter-fill" id="storageMeterFill" style="width: 0%;"></div>
+            </div>
+            <span class="storage-percent-tag" id="storagePercentText">-%</span>
+          </div>
+        </div>
           <button type="submit" class="submit-btn" id="submitBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -403,7 +423,7 @@
               </p>
               <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
                 <div style="font-size: 0.83rem;">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.42') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.43') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -833,7 +853,9 @@
                   <span class="badge badge-kio" style="background: rgba(20, 184, 166, 0.15); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.3);">kio.ac</span>
                   <span class="badge badge-xshare" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">X-Share (x-share.net)</span>
                   <span class="badge badge-romsfun" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3);">Romsfun (romsfun.com)</span>
+                  <span class="badge badge-romspure" style="background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3);">Romspure (romspure.cc)</span>
                   <span class="badge badge-wowroms" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">WoWroms (wowroms.com)</span>
+                  <span class="badge badge-planetemu" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">PlanetEmu (planetemu.net)</span>
                   <span class="badge badge-rootz" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Rootz (rootz.so)</span>
                 </div>
               </div>
@@ -872,6 +894,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.42') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.43') }}"></script>
 </body>
 </html>

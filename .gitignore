@@ -20,6 +20,7 @@ dist/
 
 # Local data & caches (sensitive configs & personal histories)
 settings.json
+jobs.json
 download_history.json
 kone_seen_posts.json
 kone_watcher_state.json

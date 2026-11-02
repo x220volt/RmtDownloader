@@ -2357,5 +2357,52 @@ class NaverMyBoxResolverTests(unittest.TestCase):
             self.assertIn("리소스 키", str(cm.exception))
 
 
+class ServerStorageEndpointTests(unittest.TestCase):
+    """서버 다운로드 폴더 저장용량 및 디스크 정보 API 단위 테스트."""
+
+    def test_get_storage_info_structure(self):
+        import os
+        import tempfile
+        from app import get_storage_info
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 테스트 파일 2개 생성 (100바이트, 200바이트)
+            f1 = os.path.join(tmpdir, "test1.bin")
+            f2 = os.path.join(tmpdir, "test2.bin")
+            with open(f1, "wb") as f:
+                f.write(b"A" * 100)
+            with open(f2, "wb") as f:
+                f.write(b"B" * 200)
+
+            info = get_storage_info(tmpdir, force_refresh=True)
+            self.assertEqual(info["download_dir"], os.path.abspath(tmpdir))
+            self.assertGreater(info["disk_total"], 0)
+            self.assertGreater(info["disk_free"], 0)
+            self.assertGreaterEqual(info["disk_percent"], 0.0)
+            self.assertEqual(info["folder_size"], 300)
+            self.assertEqual(info["file_count"], 2)
+
+    def test_server_storage_api_endpoint(self):
+        from app import app
+        from config import get_or_create_api_token
+
+        token = get_or_create_api_token()
+        with app.test_client() as client:
+            resp = client.get("/api/server/storage", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertIn("disk_total", data)
+            self.assertIn("disk_free", data)
+            self.assertIn("disk_percent", data)
+            self.assertIn("folder_size", data)
+            self.assertIn("file_count", data)
+
+            info_resp = client.get("/api/info", headers={"Authorization": f"Bearer {token}"})
+            self.assertEqual(info_resp.status_code, 200)
+            info_data = info_resp.get_json()
+            self.assertIn("storage", info_data)
+            self.assertEqual(info_data["storage"]["download_dir"], data["download_dir"])
+
+
 if __name__ == "__main__":
     unittest.main()

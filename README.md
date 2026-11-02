@@ -1,4 +1,4 @@
-# 🚀 원격 다운로더 (Remote Downloader) `v0.1.42`
+# 🚀 원격 다운로더 (Remote Downloader) `v0.1.43`
 
 스마트폰(iPhone / Android)이나 다른 PC의 웹 브라우저에서 링크·마그넷·Base64 코드를 전송하면, 서버 PC에서 해당 파일을 자동으로 해석·다운로드해 주는 파이썬 기반 원격 다운로드 센터입니다.
 
@@ -24,6 +24,8 @@
    - **MegaUp (`megaup.net`)**: Cloudflare 우회 및 다운로드 토큰 URL 해석.
    - **X-Share (`x-share.net/s/...`, `x-share.net/b/...`)**: 단일 파일 및 묶음(Bundle) API 토큰 발급·일괄 다운로드.
    - **Romsfun (`romsfun.com`)**: 레트로 게임 ROM 다운로드 페이지 자동 직링크 발급 및 멀티 파트 다운로드 지원.
+   - **Romspure (`romspure.cc`)**: 레트로 게임 ROM 다운로드 페이지 동적 AJAX 토큰 해석, Cloudflare 우회 및 멀티 파트 다운로드 지원.
+   - **PlanetEmu (`planetemu.net`)**: 레트로 게임 ROM 자동 쿼터 인증 및 고속 직링크 다운로드 지원.
    - **WoWroms (`wowroms.com`)**: 레트로 게임 ROM, ISO, 에뮬레이터 다운로드 페이지 자동 직링크 발급 및 스트리밍 다운로드 지원.
    - **Rootz (`rootz.so/d/...`)**: 프록시 다운로드 API 및 고속 CDN 직링크 자동 추출, 이어받기 지원.
    - **네이버 MYBOX (`mybox.naver.com/share/...`)**: 공유 링크 및 파일 속성 API를 통한 고속 직링크 발급 및 이어받기 지원.

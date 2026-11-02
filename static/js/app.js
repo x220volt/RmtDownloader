@@ -79,6 +79,54 @@ async function initAddons() {
   }
 }
 
+function updateStorageUI(storage) {
+  if (!storage) return;
+  const storageFreeText = document.getElementById('storageFreeText');
+  const storageTotalText = document.getElementById('storageTotalText');
+  const storageFolderText = document.getElementById('storageFolderText');
+  const storageFileCountText = document.getElementById('storageFileCountText');
+  const storageMeterFill = document.getElementById('storageMeterFill');
+  const storagePercentText = document.getElementById('storagePercentText');
+
+  if (storageFreeText) {
+    storageFreeText.textContent = formatBytes(storage.disk_free);
+  }
+  if (storageTotalText) {
+    storageTotalText.textContent = `/ 전체 ${formatBytes(storage.disk_total)}`;
+  }
+  if (storageFolderText) {
+    storageFolderText.textContent = formatBytes(storage.folder_size);
+  }
+  if (storageFileCountText) {
+    storageFileCountText.textContent = `(${storage.file_count || 0}개)`;
+  }
+  if (storageMeterFill) {
+    const pct = Math.min(100, Math.max(0, storage.disk_percent || 0));
+    storageMeterFill.style.width = pct + '%';
+    storageMeterFill.classList.remove('warning', 'danger');
+    if (pct >= 90) {
+      storageMeterFill.classList.add('danger');
+    } else if (pct >= 75) {
+      storageMeterFill.classList.add('warning');
+    }
+  }
+  if (storagePercentText) {
+    storagePercentText.textContent = `${storage.disk_percent || 0}%`;
+  }
+}
+
+async function refreshStorageInfo(force = false) {
+  try {
+    const res = await fetch(`/api/server/storage${force ? '?refresh=1' : ''}`);
+    if (res.ok) {
+      const data = await res.json();
+      updateStorageUI(data);
+    }
+  } catch (err) {
+    console.warn('저장소 정보 갱신 실패:', err);
+  }
+}
+
 async function initServerInfo() {
   try {
     const res = await fetch('/api/info');
@@ -86,6 +134,9 @@ async function initServerInfo() {
       serverInfo = await res.json();
       if (downloadDirText) {
         downloadDirText.textContent = serverInfo.download_dir || '다운로드 폴더';
+      }
+      if (serverInfo.storage) {
+        updateStorageUI(serverInfo.storage);
       }
       const teraboxPwdInput = document.getElementById('teraboxPwdInput');
       if (teraboxPwdInput) {
@@ -150,9 +201,14 @@ function handleServerEvent(event) {
     updateJobCounts();
     showToast(`새 작업이 추가되었습니다: ${event.data.filename}`);
   } else if (type === 'job_updated') {
+    const prev = jobsMap.get(event.data.id);
+    const wasCompleted = prev && prev.status === 'completed';
     jobsMap.set(event.data.id, event.data);
     updateJobCard(event.data);
     updateJobCounts();
+    if (!wasCompleted && event.data.status === 'completed') {
+      refreshStorageInfo(true);
+    }
   } else if (type === 'job_progress') {
     const job = jobsMap.get(event.data.id);
     if (job) {
@@ -165,6 +221,7 @@ function handleServerEvent(event) {
   } else if (type === 'job_removed') {
     jobsMap.delete(event.data.id);
     renderJobs();
+    refreshStorageInfo(true);
   }
 }
 
@@ -714,6 +771,7 @@ function getServiceTagClass(service) {
   if (lower.includes('kio')) return 'badge-kio';
   if (lower.includes('x-share') || lower.includes('xshare')) return 'badge-xshare';
   if (lower.includes('romsfun')) return 'badge-romsfun';
+  if (lower.includes('romspure')) return 'badge-romspure';
   if (lower.includes('wowroms')) return 'badge-wowroms';
   if (lower.includes('planetemu')) return 'badge-planetemu';
   if (lower.includes('rootz')) return 'badge-rootz';
@@ -1680,6 +1738,7 @@ async function saveSettings(e) {
       if (downloadDirText) {
         downloadDirText.textContent = payload.download_dir;
       }
+      refreshStorageInfo(true);
       if (serverInfo) {
         serverInfo.terabox_mode = payload.terabox_mode;
         serverInfo.terabox_password = payload.terabox_password || '';
@@ -2129,3 +2188,10 @@ function showRestartOverlay(targetTag) {
     }
   }, 1000);
 }
+
+// ==========================================
+// 12. 백그라운드 주기적 저장소 용량 동기화 (30초)
+// ==========================================
+setInterval(() => {
+  refreshStorageInfo();
+}, 30000);

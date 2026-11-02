@@ -1119,6 +1119,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("megaup")) return "tag-megaup";
   if (lower.includes("x-share") || lower.includes("xshare")) return "tag-xshare";
   if (lower.includes("romsfun")) return "tag-romsfun";
+  if (lower.includes("romspure")) return "tag-romspure";
   if (lower.includes("wowroms")) return "tag-wowroms";
   if (lower.includes("planetemu")) return "tag-planetemu";
   if (lower.includes("rootz")) return "tag-rootz";
@@ -1383,6 +1384,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dn|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
     { service: "Romsfun", regex: /romsfun\.com\/download\//i },
+    { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
     { service: "WoWroms", regex: /wowroms\.com\//i },
     { service: "PlanetEmu", regex: /planetemu\.net\//i },
     { service: "X-Share", regex: /x-share\.net\/[sb]\//i },

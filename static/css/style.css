@@ -350,6 +350,12 @@ body {
   border: 1px solid rgba(236, 72, 153, 0.3);
 }
 
+.badge-romspure {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
 .badge-wowroms {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
@@ -717,6 +723,15 @@ body {
   gap: 12px;
 }
 
+.save-path-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  max-width: 580px;
+}
+
 .save-path-hint {
   font-size: 0.78rem;
   color: var(--text-sub);
@@ -726,18 +741,95 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 450px;
 }
 
 .save-path-hint svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
+  color: #818cf8;
 }
 
 .save-path-hint span {
   color: var(--text-muted);
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.storage-info-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-sub);
+}
+
+.storage-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.storage-stat-pill .storage-icon {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.storage-stat-pill .storage-label {
+  color: var(--text-sub);
+}
+
+.storage-stat-pill .storage-val {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.storage-stat-pill .storage-sub {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.storage-stat-pill.folder .storage-val {
+  color: #a78bfa;
+}
+
+.storage-mini-meter {
+  width: 44px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.storage-meter-fill {
+  height: 100%;
+  background: var(--status-green);
+  border-radius: 999px;
+  transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+.storage-meter-fill.warning {
+  background: var(--status-yellow);
+}
+
+.storage-meter-fill.danger {
+  background: var(--status-red);
+}
+
+.storage-percent-tag {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .submit-btn {
@@ -1848,11 +1940,21 @@ body {
     order: 1;
   }
 
+  .save-path-wrapper {
+    max-width: 100%;
+    order: 2;
+    align-items: center;
+    text-align: center;
+  }
+
   .save-path-hint {
     font-size: 0.72rem;
     justify-content: center;
     max-width: 100%;
-    order: 2;
+  }
+
+  .storage-info-row {
+    justify-content: center;
   }
 
   /* 5. 작업 목록 헤더 및 탭 모바일 최적화 */

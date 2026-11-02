@@ -4,6 +4,26 @@
 
 ---
 
+## [v0.1.43] - 2026-11-02
+
+### 💾 서버 저장 디렉터리 디스크 여유 공간 및 보관 용량 표시
+* **저장 위치 하단 실시간 용량 모니터링 (`templates/index.html`, `static/css/style.css`, `static/js/app.js`, `app.py`)**:
+  * 메인 대시보드 저장 위치 표시 아래쪽에 서버 디스크 여유 공간(`💾 여유: xxx GB / 전체 xxx GB`), 다운로드 폴더 보관 용량(`📁 폴더: xxx MB/GB (xx개)`), 미니 게이지 바 및 사용률(`%`)을 실시간 표시.
+  * 디스크 사용률 구간별(정상 녹색, 75% 이상 주황색, 90% 이상 빨간색) 시각적 피드백 제공.
+  * REST API 엔드포인트 `/api/server/storage` 신설 및 15초 주기 백그라운드 캐싱, 다운로드 완료/작업 삭제/설정 변경 시 자동 갱신 지원.
+
+### 🎮 Romspure (romspure.cc) 레트로 게임 ROM 다운로드 지원
+* **Romspure 전용 리졸버 신설 (`downloader/resolvers/romspure.py`)**:
+  * `romspure.cc`의 게임 상세 페이지(`/roms/...`), 버전 선택 페이지(`/download/<slug>`), 개별 다운로드 페이지(`/download/<slug>/<index>`) 자동 인식 및 완벽 지원.
+  * 워드프레스 AJAX 동적 보안 Nonce(`action=romspure_get_nonce`) 및 서명된 직링크(`action=app_get_download_link`) 발급 프로세스 구현.
+  * Cloudflare 보호 저장소(`sto2.romsforever.co` 등) 자동 감지 및 스텔스 브라우저 연동 `cf_clearance` 보안 토큰 자동 통과 기능 지원.
+  * 멀티 디스크/버전 분할 링크 자동 추출 및 순차 다운로드 큐잉(`extra_jobs`) 지원.
+* **애드온 및 UI/확장 프로그램 연동 (`downloader/addons/definitions.py`, `templates/index.html`, `static/`, `extension/`)**:
+  * 호스팅 애드온 `RomspureAddon` 등록 (`domains=["romspure.cc"]`).
+  * 웹 대시보드 배지 스타일(`.badge-romspure`) 및 크롬 확장 프로그램 서비스 감지 태그(`.tag-romspure`) 추가.
+
+---
+
 ## [v0.1.42] - 2026-11-01
 
 ### ⚡ aria2c 기반 HTTP/HTTPS 고속 분할 다운로드 가속 엔진 탑재
