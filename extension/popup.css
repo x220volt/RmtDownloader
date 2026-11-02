@@ -726,6 +726,11 @@ body {
   color: #fff;
 }
 
+.job-action-btn.action-cancel:hover {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
 .job-action-btn.btn-del:hover {
   background: rgba(239, 68, 68, 0.2);
   color: #fca5a5;

@@ -1001,6 +1001,9 @@ function createJobCard(job) {
   const retryBtn = card.querySelector(".action-retry");
   if (retryBtn) retryBtn.addEventListener("click", () => handleJobAction(job.id, "retry"));
 
+  const cancelBtn = card.querySelector(".action-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => handleJobAction(job.id, "cancel"));
+
   const deleteBtn = card.querySelector(".action-delete");
   if (deleteBtn) deleteBtn.addEventListener("click", () => handleJobAction(job.id, "delete"));
 
@@ -1044,9 +1047,17 @@ function renderActionButtons(job) {
     `;
   }
 
+  if (["downloading", "queued", "resolving", "paused"].includes(job.status)) {
+    btns += `
+      <button type="button" class="job-action-btn action-cancel" title="취소">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    `;
+  }
+
   btns += `
-    <button type="button" class="job-action-btn btn-del action-delete" title="목록에서 제거">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    <button type="button" class="job-action-btn btn-del action-delete" title="목록에서 삭제">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
     </button>
   `;
 
@@ -1074,6 +1085,16 @@ async function handleJobAction(jobId, action) {
 
     if (res.ok) {
       await fetchJobs();
+      if (action === "cancel") {
+        showPopupToast("다운로드가 취소되었습니다.");
+      } else if (action === "pause") {
+        showPopupToast("다운로드가 일시정지되었습니다.");
+      } else if (action === "resume") {
+        showPopupToast("다운로드가 재개되었습니다.");
+      }
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showPopupToast(data.error || "작업 처리에 실패했습니다.", true);
     }
   } catch (err) {
     showPopupToast(`작업 처리 실패: ${err.message}`, true);

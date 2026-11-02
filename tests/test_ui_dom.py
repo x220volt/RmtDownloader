@@ -419,5 +419,30 @@ document.addEventListener('DOMContentLoaded', async function() {
                 os.remove(test_html)
 
 
+    def test_extension_and_web_action_buttons_consistency(self):
+        """Verify that popup.js and app.js both provide pause, cancel, and delete buttons consistently."""
+        with open("extension/popup.js", "r", encoding="utf-8") as f:
+            popup_js = f.read()
+        with open("static/js/app.js", "r", encoding="utf-8") as f:
+            app_js = f.read()
+
+        # 1. popup.js must have action-cancel and action-delete with trash icon
+        self.assertIn("action-cancel", popup_js, "popup.js must support action-cancel")
+        self.assertIn('title="취소"', popup_js, "popup.js cancel button must have title 취소")
+        self.assertIn("action-pause", popup_js, "popup.js must support action-pause")
+        self.assertIn("action-delete", popup_js, "popup.js must support action-delete")
+        self.assertIn('polyline points="3 6 5 6 21 6"', popup_js, "popup.js delete button must use trash can icon")
+
+        # 2. cancel event binding
+        self.assertIn('card.querySelector(".action-cancel")', popup_js)
+        self.assertIn('handleJobAction(job.id, "cancel")', popup_js)
+
+        # 3. app.js also supports pause, cancel, and delete
+        self.assertIn("cancelJob", app_js)
+        self.assertIn("pauseJob", app_js)
+        self.assertIn("deleteJob", app_js)
+        self.assertIn("['downloading', 'queued', 'resolving', 'paused'].includes(job.status)", app_js)
+
+
 if __name__ == "__main__":
     unittest.main()
