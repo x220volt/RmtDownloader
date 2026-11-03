@@ -1144,6 +1144,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("wowroms")) return "tag-wowroms";
   if (lower.includes("planetemu")) return "tag-planetemu";
   if (lower.includes("vimm")) return "tag-vimm";
+  if (lower.includes("mediafire")) return "tag-mediafire";
   if (lower.includes("rootz")) return "tag-rootz";
   if (lower.includes("torrent") || lower.includes("마그넷")) return "tag-torrent";
   return "tag-direct";
@@ -1374,6 +1375,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Vimm's Lair", regex: /vimm\.net\/vault\//i },
     { service: "X-Share", regex: /x-share\.net\/[sb]\//i },
     { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
+    { service: "MediaFire", regex: /mediafire\.com\/(?:file|download|view|\?)/i },
     { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
     { service: "MegaUp", regex: /megaup\.net\//i },
     { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
@@ -1464,7 +1466,7 @@ function extractPageDownloadLinksInPage() {
     let pageTitle = "";
     try {
       // PlanetEmu / Vimm / ROM 전용 폼 버튼 텍스트 추출 시도
-      const romBtn = document.querySelector('form.downloadForm input[type="submit"], form.downloadForm button, form#dl-form button');
+      const romBtn = document.querySelector('form.downloadForm input[type="submit"], form.downloadForm button, form#dl-form button, a#downloadButton, a[aria-label="Download file"]');
       if (romBtn) {
         const btnVal = (romBtn.value || romBtn.innerText || "").trim().replace(/^(?:Download|Télécharger|Telecharger)\s+/i, "");
         if (btnVal) pageTitle = btnVal;
