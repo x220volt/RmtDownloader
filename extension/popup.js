@@ -1146,6 +1146,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("vimm")) return "tag-vimm";
   if (lower.includes("mediafire")) return "tag-mediafire";
   if (lower.includes("filekeeper")) return "tag-filekeeper";
+  if (lower.includes("datanodes")) return "tag-datanodes";
   if (lower.includes("rootz")) return "tag-rootz";
   if (lower.includes("torrent") || lower.includes("마그넷")) return "tag-torrent";
   return "tag-direct";
@@ -1378,6 +1379,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
     { service: "MediaFire", regex: /mediafire\.com\/(?:file|download|view|\?)/i },
     { service: "FileKeeper", regex: /filekeeper\.net\/[a-zA-Z0-9_-]+/i },
+    { service: "DataNodes", regex: /datanodes\.to\/[a-zA-Z0-9_-]+/i },
     { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
     { service: "MegaUp", regex: /megaup\.net\//i },
     { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
