@@ -312,37 +312,54 @@ class TistoryResolver(BaseResolver):
             if not file_items:
                 from ..url_helper import is_shortened_url, parse_download_candidates, unshorten_url
                 from .dispatcher import default_dispatcher
+                from .webpage import _has_downloadable_extension
 
-                # (1) 본문 및 전체 문서 내 <a> 태그에서 링크와 파일명/제목 함께 수집
+                EXCLUDED_RESOLVER_NAMES = (
+                    "Tistory",
+                    "Direct",
+                    "Direct Link",
+                    "WebPage",
+                    "WebPage Post",
+                    "Naver Cafe",
+                )
+
+                # (1) 본문 영역(article) 내 <a> 태그에서 외부 다운로드 링크 수집 (본문 외 사이드바/태그/카테고리 탐색 방지)
                 cand_items: list[dict] = []
                 seen_cand_urls = set()
 
-                containers_to_scan = [article] if article else []
-                if soup not in containers_to_scan:
-                    containers_to_scan.append(soup)
+                target_container = article if article else soup
 
-                for cont in containers_to_scan:
-                    for a in cont.find_all("a", href=True):
-                        raw_href = a.get("href")
-                        if not raw_href or not isinstance(raw_href, str):
-                            continue
-                        href = raw_href.strip()
-                        if not href or href.startswith("#") or href.startswith("javascript:"):
-                            continue
-                        full_u = urljoin(clean_url, href)
-                        u_no_hash = full_u.split("#")[0]
-                        if u_no_hash in seen_cand_urls or u_no_hash == clean_url:
-                            continue
+                for a in target_container.find_all("a", href=True):
+                    raw_href = a.get("href")
+                    if not raw_href or not isinstance(raw_href, str):
+                        continue
+                    href = raw_href.strip()
+                    if not href or href.startswith("#") or href.startswith("javascript:"):
+                        continue
+                    full_u = urljoin(clean_url, href)
+                    u_no_hash = full_u.split("#")[0]
+                    if u_no_hash in seen_cand_urls or u_no_hash == clean_url:
+                        continue
 
-                        raw_txt = a.get_text(strip=True) or a.get("title") or a.get("download") or ""
-                        link_txt = str(raw_txt).strip() if raw_txt else ""
-                        link_txt = re.sub(r"^[\s▼▶▷►\-_]+", "", link_txt).strip()
+                    # 티스토리 내부 페이지(/tag/, /category/, 다른 글 등)는 외부 다운로드 후보에서 배제
+                    try:
+                        p_u = urlparse(full_u)
+                        host_u = (p_u.hostname or "").lower()
+                        if host_u == "tistory.com" or host_u.endswith(".tistory.com"):
+                            if not _ATTACH_URL_PATTERN.search(full_u):
+                                continue
+                    except Exception:
+                        pass
 
-                        cand_items.append({"url": full_u, "name": link_txt})
-                        seen_cand_urls.add(u_no_hash)
+                    raw_txt = a.get_text(strip=True) or a.get("title") or a.get("download") or ""
+                    link_txt = str(raw_txt).strip() if raw_txt else ""
+                    link_txt = re.sub(r"^[\s▼▶▷►\-_]+", "", link_txt).strip()
+
+                    cand_items.append({"url": full_u, "name": link_txt})
+                    seen_cand_urls.add(u_no_hash)
 
                 # (2) 본문 텍스트 내 평문 및 Base64 인코딩 링크 파싱
-                raw_body_text = article.get_text("\n") if article else soup.get_text("\n")
+                raw_body_text = target_container.get_text("\n")
                 text_cands = parse_download_candidates(
                     raw_text=raw_body_text, single_referer=clean_url
                 )
@@ -351,9 +368,18 @@ class TistoryResolver(BaseResolver):
                     if not t_url or t_url == clean_url:
                         continue
                     t_no_hash = t_url.split("#")[0]
-                    if t_no_hash not in seen_cand_urls:
-                        cand_items.append(tc)
-                        seen_cand_urls.add(t_no_hash)
+                    if t_no_hash in seen_cand_urls:
+                        continue
+                    try:
+                        p_tu = urlparse(t_url)
+                        host_tu = (p_tu.hostname or "").lower()
+                        if host_tu == "tistory.com" or host_tu.endswith(".tistory.com"):
+                            if not _ATTACH_URL_PATTERN.search(t_url):
+                                continue
+                    except Exception:
+                        pass
+                    cand_items.append(tc)
+                    seen_cand_urls.add(t_no_hash)
 
                 # (3) 외부 클라우드 리졸버 매칭 및 해석 (다중 링크는 extra_jobs로 큐잉)
                 resolved_first = None
@@ -368,15 +394,25 @@ class TistoryResolver(BaseResolver):
                         if expanded and expanded != cand_url:
                             cand_url = expanded
 
+                    # 전문 클라우드 리졸버 매칭 확인
                     matched_resolver = next(
                         (
                             r
                             for r in default_dispatcher.resolvers
-                            if r.name not in ("Tistory", "Direct", "WebPage Post")
+                            if r.name not in EXCLUDED_RESOLVER_NAMES
                             and r.can_handle(cand_url)
                         ),
                         None,
                     )
+                    # 전문 클라우드가 아닐 경우 명시적인 파일 확장자(.zip, .rar 등) 직링크인지 확인
+                    if not matched_resolver and _has_downloadable_extension(cand_url):
+                        direct_res = next(
+                            (r for r in default_dispatcher.resolvers if r.name == "Direct Link"),
+                            None,
+                        )
+                        if direct_res:
+                            matched_resolver = direct_res
+
                     if not matched_resolver:
                         continue
 
