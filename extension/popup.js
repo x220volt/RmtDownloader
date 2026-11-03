@@ -1353,12 +1353,51 @@ async function scanCurrentPage() {
 function extractPageDownloadLinksInPage() {
   const links = [];
   const seenUrls = new Set();
-
   const currentUrl = window.location.href;
+
+  const HOSTING_PATTERNS = [
+    { service: "MEGA", regex: /mega\.(?:nz|co\.nz|io)\/(?:file\/|#?!)/i },
+    { service: "TeraBox", regex: /(?:1024terabox|terabox|teraboxapp|freeterabox)\.(?:com|app)/i },
+    { service: "GoFile", regex: /gofile\.io\/d\//i },
+    { service: "1fichier", regex: /1fichier\.com\/\?/i },
+    { service: "Transfer.it", regex: /transfer\.it\/t\//i },
+    { service: "GigaFile", regex: /(?:gigafile\.nu|xgf\.nu)/i },
+    { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
+    { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
+    { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
+    { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dn|daumcdn\.net)/i },
+    { service: "Rootz", regex: /rootz\.so\/d\//i },
+    { service: "Romsfun", regex: /romsfun\.com\/download\//i },
+    { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
+    { service: "WoWroms", regex: /wowroms\.com\//i },
+    { service: "PlanetEmu", regex: /planetemu\.net\/(?:[a-z]{2}\/)?(?:roms?\/[^\/?#]+\/[^\/?#]+|download\/rom)/i },
+    { service: "Vimm's Lair", regex: /vimm\.net\/vault\//i },
+    { service: "X-Share", regex: /x-share\.net\/[sb]\//i },
+    { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
+    { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
+    { service: "MegaUp", regex: /megaup\.net\//i },
+    { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
+  ];
+
+  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|iso|bin|cue|apk|exe|msi|dmg|pkg|mp4|mkv|mp3|flac|torrent)(\?.*)?$/i;
+
+  function identifyService(url) {
+    if (url.startsWith("magnet:?")) return "BitTorrent";
+    for (const p of HOSTING_PATTERNS) {
+      if (p.regex.test(url)) return p.service;
+    }
+    if (FILE_EXT_REGEX.test(url)) return "Direct File";
+    return "Direct Link";
+  }
+
+  function cleanTitle(str) {
+    if (!str) return "";
+    return str.replace(/\s+/g, " ").replace(/^[\s▼▶▷►\-_]+/, "").trim();
+  }
+
   const isNaverCafe = /(?:cafe\.naver\.com|m\.cafe\.naver\.com)/i.test(currentUrl);
 
   // 1. 현재 열린 페이지 자체가 네이버 카페 게시글인 경우:
-  // 현재 게시글 URL을 1순위 항목(전체 첨부파일 다운로드)으로 자동 추가
   const cafeArticleMatch = currentUrl.match(/cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?|ca-fe\/)/i);
   if (isNaverCafe && cafeArticleMatch) {
     let articleTitle = document.title ? document.title.replace(/\s*:\s*네이버\s*카페\s*$/i, "").trim() : "";
@@ -1383,7 +1422,6 @@ function extractPageDownloadLinksInPage() {
   }
 
   // 1-1. 현재 열린 페이지가 티스토리 게시글인 경우:
-  // 현재 게시글 URL을 최우선 항목(티스토리 첨부/외부 클라우드 링크 일괄 다운로드)으로 자동 추가
   const isTistory = /(?:\.tistory\.com)/i.test(currentUrl);
   const tistoryArticleMatch = currentUrl.match(/\.tistory\.com\/(?:(?:m\/)?\d+|entry\/[^\s\/?#]+)/i);
   if (isTistory && tistoryArticleMatch) {
@@ -1414,7 +1452,46 @@ function extractPageDownloadLinksInPage() {
     }
   }
 
-  // 검색할 도큐먼트 목록 (최상위 document + iframe#cafe_main)
+  // 1-2. 현재 열린 페이지 자체가 지원되는 호스팅/클라우드/ROM 다운로드 페이지인 경우 최상단 항목으로 자동 추가
+  const currentHostingService = identifyService(currentUrl);
+  if (
+    currentHostingService &&
+    currentHostingService !== "Direct Link" &&
+    currentHostingService !== "Direct File" &&
+    !isNaverCafe &&
+    !isTistory
+  ) {
+    let pageTitle = "";
+    try {
+      // PlanetEmu / Vimm / ROM 전용 폼 버튼 텍스트 추출 시도
+      const romBtn = document.querySelector('form.downloadForm input[type="submit"], form.downloadForm button, form#dl-form button');
+      if (romBtn) {
+        const btnVal = (romBtn.value || romBtn.innerText || "").trim().replace(/^(?:Download|Télécharger|Telecharger)\s+/i, "");
+        if (btnVal) pageTitle = btnVal;
+      }
+      if (!pageTitle) {
+        const h1 = document.querySelector("h1, h2, .title, #title");
+        if (h1 && h1.innerText && h1.innerText.trim()) {
+          pageTitle = h1.innerText.trim();
+        } else if (document.title) {
+          pageTitle = document.title.replace(/\s*[-|–].*$/i, "").trim();
+        }
+      }
+    } catch (e) {}
+
+    const cleanCurrentUrl = currentUrl.split("#")[0];
+    if (!seenUrls.has(cleanCurrentUrl)) {
+      seenUrls.add(cleanCurrentUrl);
+      links.push({
+        url: cleanCurrentUrl,
+        title: `[${currentHostingService}] ${pageTitle || document.title || "게임/파일 다운로드"}`,
+        service: currentHostingService,
+        password: "",
+      });
+    }
+  }
+
+  // 검색할 도큐먼트 목록 (최상위 document + iframe)
   const docsToScan = [document];
   try {
     const iframes = Array.from(document.querySelectorAll("iframe"));
@@ -1424,46 +1501,6 @@ function extractPageDownloadLinksInPage() {
       }
     }
   } catch (e) {}
-
-  const HOSTING_PATTERNS = [
-    { service: "MEGA", regex: /mega\.(?:nz|co\.nz|io)\/(?:file\/|#?!)/i },
-    { service: "TeraBox", regex: /(?:1024terabox|terabox|teraboxapp|freeterabox)\.(?:com|app)/i },
-    { service: "GoFile", regex: /gofile\.io\/d\//i },
-    { service: "1fichier", regex: /1fichier\.com\/\?/i },
-    { service: "Transfer.it", regex: /transfer\.it\/t\//i },
-    { service: "GigaFile", regex: /(?:gigafile\.nu|xgf\.nu)/i },
-    { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
-    { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
-    { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
-    { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dn|daumcdn\.net)/i },
-    { service: "Rootz", regex: /rootz\.so\/d\//i },
-    { service: "Romsfun", regex: /romsfun\.com\/download\//i },
-    { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
-    { service: "WoWroms", regex: /wowroms\.com\//i },
-    { service: "PlanetEmu", regex: /planetemu\.net\//i },
-    { service: "Vimm's Lair", regex: /vimm\.net\/vault\//i },
-    { service: "X-Share", regex: /x-share\.net\/[sb]\//i },
-    { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
-    { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
-    { service: "MegaUp", regex: /megaup\.net\//i },
-    { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
-  ];
-
-  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|iso|bin|cue|apk|exe|msi|dmg|pkg|mp4|mkv|mp3|flac|torrent)(\?.*)?$/i;
-
-  function identifyService(url) {
-    if (url.startsWith("magnet:?")) return "BitTorrent";
-    for (const p of HOSTING_PATTERNS) {
-      if (p.regex.test(url)) return p.service;
-    }
-    if (FILE_EXT_REGEX.test(url)) return "Direct File";
-    return "Direct Link";
-  }
-
-  function cleanTitle(str) {
-    if (!str) return "";
-    return str.replace(/\s+/g, " ").replace(/^[\s▼▶▷►\-_]+/, "").trim();
-  }
 
   for (const doc of docsToScan) {
     // 1. 네이버 카페 전용 첨부파일 요소 정밀 스캔
@@ -1498,7 +1535,6 @@ function extractPageDownloadLinksInPage() {
       const href = (a.href || "").trim();
       if (!href || href.startsWith("javascript:") || href.startsWith("#")) continue;
 
-      // 네이버 카페 내부의 다른 게시글 링크(목록/추천/사이드바)는 무시!
       if (isNaverCafe && /cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?)/i.test(href)) {
         continue;
       }
@@ -1546,7 +1582,6 @@ function extractPageDownloadLinksInPage() {
       let rawUrl = match[0].replace(/[.,;:)]+$/, "");
       if (seenUrls.has(rawUrl)) continue;
 
-      // 네이버 카페 게시글 링크는 평문 링크에서도 제외
       if (isNaverCafe && /cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?)/i.test(rawUrl)) {
         continue;
       }
@@ -1571,40 +1606,54 @@ function extractPageDownloadLinksInPage() {
 
         links.push({
           url: rawUrl,
-          title: rawUrl.split("/").pop().split("?")[0] || rawUrl,
+          title: cleanTitle(rawUrl.split("/").pop().split("?")[0]) || rawUrl,
           service: identifyService(rawUrl),
           password: password,
         });
       }
     }
 
-    // 3-2. Base64 인코딩 링크
-    const b64Regex = /(?:aHR0cHM6Ly[A-Za-z0-9+/=]{16,}|bWFnbmV0O[A-Za-z0-9+/=]{16,})/g;
+    // 3-2. 본문 Base64 인코딩 링크 탐지 (단일 문자열 or "URL | 파일명" or "aHR0c...")
+    const b64Regex = /(?:[A-Za-z0-9+/_-]{16,}={0,2})/g;
     let b64Match;
     while ((b64Match = b64Regex.exec(bodyText)) !== null) {
+      const candidate = b64Match[0];
       try {
-        const decoded = atob(b64Match[0]);
-        if (/^(https?:\/\/|magnet:\?)/i.test(decoded)) {
-          if (!seenUrls.has(decoded)) {
-            seenUrls.add(decoded);
+        let normalized = candidate.replace(/-/g, "+").replace(/_/g, "/");
+        while (normalized.length % 4 !== 0) {
+          normalized += "=";
+        }
+        const decoded = atob(normalized);
+        if (
+          decoded &&
+          (decoded.includes("http://") ||
+            decoded.includes("https://") ||
+            decoded.includes("magnet:?"))
+        ) {
+          const innerUrls = decoded.match(/(?:https?:\/\/[^\s<>"'`|]+|magnet:\?xt=[^\s<>"'`|]+)/g);
+          if (innerUrls) {
+            for (const decUrl of innerUrls) {
+              if (seenUrls.has(decUrl)) continue;
+              seenUrls.add(decUrl);
 
-            let password = "";
-            const startIdx = Math.max(0, b64Match.index - 50);
-            const endIdx = Math.min(bodyText.length, b64Match.index + b64Match[0].length + 100);
-            const ctxText = bodyText.substring(startIdx, endIdx);
-            const pwMatch = ctxText.match(
-              /(?:비번|암호|비밀번호|추출\s*코드|pwd|pw|pass|code)\s*[:=]?\s*([a-zA-Z0-9_!@#$%^&*-]{2,32})/i
-            );
-            if (pwMatch) {
-              password = pwMatch[1].trim();
+              let password = "";
+              const startIdx = Math.max(0, b64Match.index - 50);
+              const endIdx = Math.min(bodyText.length, b64Match.index + candidate.length + 100);
+              const ctxText = bodyText.substring(startIdx, endIdx);
+              const pwMatch = ctxText.match(
+                /(?:비번|암호|비밀번호|추출\s*코드|pwd|pw|pass|code)\s*[:=]?\s*([a-zA-Z0-9_!@#$%^&*-]{2,32})/i
+              );
+              if (pwMatch) {
+                password = pwMatch[1].trim();
+              }
+
+              links.push({
+                url: decUrl,
+                title: `[Base64] ${cleanTitle(decUrl.split("/").pop().split("?")[0]) || decUrl}`,
+                service: identifyService(decUrl),
+                password: password,
+              });
             }
-
-            links.push({
-              url: decoded,
-              title: `[Base64] ` + (decoded.split("/").pop().split("?")[0] || decoded),
-              service: identifyService(decoded),
-              password: password,
-            });
           }
         }
       } catch (e) {}

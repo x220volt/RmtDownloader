@@ -774,6 +774,7 @@ function getServiceTagClass(service) {
   if (lower.includes('romspure')) return 'badge-romspure';
   if (lower.includes('wowroms')) return 'badge-wowroms';
   if (lower.includes('planetemu')) return 'badge-planetemu';
+  if (lower.includes('vimm')) return 'badge-vimm';
   if (lower.includes('rootz')) return 'badge-rootz';
   if (lower.includes('gdrive') || lower.includes('google drive') || lower.includes('google')) return 'badge-gdrive';
   return 'badge-direct';

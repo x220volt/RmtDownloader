@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from ..engine import sanitize_filename
+from ..engine import sanitize_filename, sanitize_folder_name
 from .base import BaseResolver
 
 logger = logging.getLogger(__name__)
@@ -40,8 +40,7 @@ class PlanetEmuResolver(BaseResolver):
                 return False
             path = (parsed.path or "").lower()
             return bool(
-                re.search(r"^/(?:[a-z]{2}/)?rom/", path)
-                or re.search(r"^/(?:[a-z]{2}/)?roms/", path)
+                re.search(r"^/(?:[a-z]{2}/)?roms?/[^/]+/[^/]+", path)
                 or "/download/rom" in path
             )
         except Exception:
@@ -261,6 +260,13 @@ class PlanetEmuResolver(BaseResolver):
                 cookie_parts.append(f"{c_name}={c_val}")
         cookies_str = "; ".join(cookie_parts) or None
 
+        clean_title = ""
+        h1 = soup.find("h1")
+        if h1 and h1.get_text(strip=True):
+            clean_title = h1.get_text(strip=True)
+        elif extracted_filename:
+            clean_title = re.sub(r"\.[a-zA-Z0-9]+$", "", extracted_filename).strip()
+
         return {
             "url": token_url,
             "filename": sanitize_filename(extracted_filename) if extracted_filename else None,
@@ -271,4 +277,6 @@ class PlanetEmuResolver(BaseResolver):
             "cookies": cookies_str,
             "referer": url,
             "source_service": "PlanetEmu",
+            "subfolder": sanitize_folder_name(clean_title) if clean_title else "",
+            "article_title": clean_title,
         }
