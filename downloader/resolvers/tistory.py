@@ -204,6 +204,10 @@ class TistoryResolver(BaseResolver):
                 or soup.find("div", class_="tt_article_useless_p_margin")
                 or soup.find("div", class_="article_skin")
                 or soup.find("div", class_="article-view")
+                or soup.find("div", class_="post-content")
+                or soup.find("div", class_="contents_style")
+                or soup.find("div", class_="content")
+                or soup.find("article")
                 or soup
             )
 
@@ -306,45 +310,128 @@ class TistoryResolver(BaseResolver):
                     )
 
             if not file_items:
-                from ..url_helper import parse_download_candidates
+                from ..url_helper import is_shortened_url, parse_download_candidates, unshorten_url
                 from .dispatcher import default_dispatcher
 
-                ext_texts: list[str] = [
-                    str(a.get("href") or "") for a in article.find_all("a", href=True)
-                ]
-                ext_texts.append(article.get_text("\n"))
-                ext_candidates = parse_download_candidates(
-                    raw_text="\n".join(ext_texts), single_referer=clean_url
+                # (1) 본문 및 전체 문서 내 <a> 태그에서 링크와 파일명/제목 함께 수집
+                cand_items: list[dict] = []
+                seen_cand_urls = set()
+
+                containers_to_scan = [article] if article else []
+                if soup not in containers_to_scan:
+                    containers_to_scan.append(soup)
+
+                for cont in containers_to_scan:
+                    for a in cont.find_all("a", href=True):
+                        raw_href = a.get("href")
+                        if not raw_href or not isinstance(raw_href, str):
+                            continue
+                        href = raw_href.strip()
+                        if not href or href.startswith("#") or href.startswith("javascript:"):
+                            continue
+                        full_u = urljoin(clean_url, href)
+                        u_no_hash = full_u.split("#")[0]
+                        if u_no_hash in seen_cand_urls or u_no_hash == clean_url:
+                            continue
+
+                        raw_txt = a.get_text(strip=True) or a.get("title") or a.get("download") or ""
+                        link_txt = str(raw_txt).strip() if raw_txt else ""
+                        link_txt = re.sub(r"^[\s▼▶▷►\-_]+", "", link_txt).strip()
+
+                        cand_items.append({"url": full_u, "name": link_txt})
+                        seen_cand_urls.add(u_no_hash)
+
+                # (2) 본문 텍스트 내 평문 및 Base64 인코딩 링크 파싱
+                raw_body_text = article.get_text("\n") if article else soup.get_text("\n")
+                text_cands = parse_download_candidates(
+                    raw_text=raw_body_text, single_referer=clean_url
                 )
-                for cand in ext_candidates:
+                for tc in text_cands:
+                    t_url = tc.get("url", "")
+                    if not t_url or t_url == clean_url:
+                        continue
+                    t_no_hash = t_url.split("#")[0]
+                    if t_no_hash not in seen_cand_urls:
+                        cand_items.append(tc)
+                        seen_cand_urls.add(t_no_hash)
+
+                # (3) 외부 클라우드 리졸버 매칭 및 해석 (다중 링크는 extra_jobs로 큐잉)
+                resolved_first = None
+                extra_jobs = []
+
+                for cand in cand_items:
                     cand_url = cand.get("url", "")
+                    if not cand_url:
+                        continue
+                    if is_shortened_url(cand_url):
+                        expanded = unshorten_url(cand_url)
+                        if expanded and expanded != cand_url:
+                            cand_url = expanded
+
                     matched_resolver = next(
                         (
                             r
                             for r in default_dispatcher.resolvers
-                            if r.name not in ("Tistory", "Direct")
+                            if r.name not in ("Tistory", "Direct", "WebPage Post")
                             and r.can_handle(cand_url)
                         ),
                         None,
                     )
-                    if matched_resolver:
-                        logger.info(
-                            f"티스토리 본문에서 외부 클라우드 링크({matched_resolver.name}) 감지: {cand_url}"
+                    if not matched_resolver:
+                        continue
+
+                    merged_opts = dict(options or {})
+                    merged_opts.update(cand.get("options") or {})
+                    if cand.get("name") and not merged_opts.get("filename"):
+                        merged_opts["filename"] = cand["name"]
+                    merged_opts.setdefault("referer", clean_url)
+                    merged_opts.setdefault("subfolder", post_title)
+                    merged_opts.setdefault("article_title", post_title)
+
+                    if resolved_first is None:
+                        try:
+                            logger.info(
+                                f"티스토리 본문에서 외부 클라우드 링크({matched_resolver.name}) 감지 및 해석: {cand_url}"
+                            )
+                            resolved_first = matched_resolver.resolve(cand_url, merged_opts)
+                            resolved_first.setdefault("source_page_url", clean_url)
+                            resolved_first.setdefault("article_title", post_title)
+                            resolved_first.setdefault("subfolder", post_title)
+                            if cand.get("name") and (
+                                not resolved_first.get("filename")
+                                or resolved_first.get("filename").startswith("gdrive_")
+                            ):
+                                resolved_first["filename"] = cand["name"]
+                        except Exception as e:
+                            logger.warning(
+                                f"티스토리 외부 클라우드 링크 해석 실패 ({cand_url}): {e}"
+                            )
+                            continue
+                    else:
+                        extra_jobs.append(
+                            {
+                                "url": cand_url,
+                                "filename": cand.get("name", ""),
+                                "options": merged_opts,
+                            }
                         )
-                        merged_opts = dict(options or {})
-                        merged_opts.update(cand.get("options") or {})
-                        resolved = matched_resolver.resolve(cand_url, merged_opts)
-                        resolved.setdefault("article_title", post_title)
-                        resolved.setdefault("subfolder", post_title)
-                        return resolved
+
+                if resolved_first:
+                    if extra_jobs:
+                        existing_extras = list(resolved_first.get("extra_jobs") or [])
+                        existing_extras.extend(extra_jobs)
+                        resolved_first["extra_jobs"] = existing_extras
+                    return resolved_first
+
                 try:
                     from .webpage import WebPageResolver
 
                     wp_res = WebPageResolver().resolve_from_html(
                         resp.text, clean_url, options=options
                     )
-                    wp_res["article_title"] = post_title
-                    wp_res["subfolder"] = post_title
+                    wp_res.setdefault("article_title", post_title)
+                    wp_res.setdefault("subfolder", post_title)
+                    wp_res.setdefault("source_page_url", clean_url)
                     return wp_res
                 except Exception:
                     pass

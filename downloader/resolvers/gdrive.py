@@ -30,16 +30,19 @@ def extract_gdrive_id(url: str) -> str:
     if not url:
         return ""
 
-    # 1. /file/d/{id} or /document/d/{id}
-    m = re.search(r"/(?:file|document)/d/([a-zA-Z0-9_-]+)", url)
+    # 1. /file/(u/\d+/)?d/{id} or /document/(u/\d+/)?d/{id}
+    m = re.search(r"/(?:file|document)/(?:u/\d+/)?d/([a-zA-Z0-9_-]+)", url)
     if m:
         return m.group(1)
 
     # 2. Query param: id={id}
-    parsed = urllib.parse.urlparse(url)
-    qs = urllib.parse.parse_qs(parsed.query)
-    if "id" in qs and qs["id"]:
-        return qs["id"][0]
+    try:
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "id" in qs and qs["id"]:
+            return qs["id"][0]
+    except Exception:
+        pass
 
     # 3. /d/{id}
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
@@ -58,9 +61,9 @@ class GoogleDriveResolver(BaseResolver):
         if not url:
             return False
         try:
-            parsed = urllib.parse.urlparse(url)
+            parsed = urllib.parse.urlparse(url.strip())
             host = (parsed.hostname or "").lower()
-            if host in GDRIVE_HOSTS:
+            if any(host == h or host.endswith("." + h) for h in GDRIVE_HOSTS):
                 # 파일 ID가 있거나 드라이브 경로가 포함된 경우
                 return (
                     bool(extract_gdrive_id(url))
@@ -113,16 +116,6 @@ class GoogleDriveResolver(BaseResolver):
                         )
                         if t:
                             filename = t
-                elif resp_view.status_code == 404:
-                    raise FileNotFoundError(
-                        f"Google Drive 파일을 찾을 수 없거나 삭제되었습니다 (404 Not Found): id={file_id}"
-                    )
-                elif resp_view.status_code == 403:
-                    raise PermissionError(
-                        "Google Drive 파일 접근 권한이 없습니다 (403 Forbidden). 파일 공유 권한을 확인해주세요."
-                    )
-            except (FileNotFoundError, PermissionError):
-                raise
             except Exception as e:
                 logger.debug(
                     f"Google Drive view 페이지 메타데이터 파싱 예외 (무시 후 다운로드 계속): {e}"
@@ -233,6 +226,11 @@ class GoogleDriveResolver(BaseResolver):
                                 logger.info(
                                     f"[GoogleDriveResolver] 정규식 다운로드 링크 파싱 완료: {final_url}"
                                 )
+
+                if not filename and options and options.get("filename"):
+                    opt_fn = str(options["filename"]).strip()
+                    if opt_fn and not opt_fn.startswith("http"):
+                        filename = opt_fn
 
                 if not filename:
                     filename = f"gdrive_{file_id}.bin"

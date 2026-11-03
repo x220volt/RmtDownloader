@@ -1381,6 +1381,38 @@ function extractPageDownloadLinksInPage() {
     });
   }
 
+  // 1-1. 현재 열린 페이지가 티스토리 게시글인 경우:
+  // 현재 게시글 URL을 최우선 항목(티스토리 첨부/외부 클라우드 링크 일괄 다운로드)으로 자동 추가
+  const isTistory = /(?:\.tistory\.com)/i.test(currentUrl);
+  const tistoryArticleMatch = currentUrl.match(/\.tistory\.com\/(?:(?:m\/)?\d+|entry\/[^\s\/?#]+)/i);
+  if (isTistory && tistoryArticleMatch) {
+    let articleTitle = "";
+    try {
+      const ogTitleElem = document.querySelector('meta[property="og:title"]');
+      if (ogTitleElem && ogTitleElem.content) {
+        articleTitle = ogTitleElem.content.trim();
+      } else {
+        const tElem = document.querySelector(".title_post, h1.title, .entry-title, h2.title, .article_header .title");
+        if (tElem && tElem.innerText.trim()) {
+          articleTitle = tElem.innerText.trim();
+        } else if (document.title) {
+          articleTitle = document.title.replace(/\s*::\s*[^:]+$/i, "").replace(/\s*-\s*[^-]+$/i, "").trim();
+        }
+      }
+    } catch (e) {}
+
+    const cleanArticleUrl = currentUrl.split("?")[0].replace(/\/+$/, "") + (currentUrl.includes("?") ? "?" + currentUrl.split("?")[1] : "");
+    if (!seenUrls.has(cleanArticleUrl)) {
+      seenUrls.add(cleanArticleUrl);
+      links.push({
+        url: currentUrl,
+        title: `[티스토리 첨부/링크] ${articleTitle || "게시글 다운로드"}`,
+        service: "Tistory",
+        password: "",
+      });
+    }
+  }
+
   // 검색할 도큐먼트 목록 (최상위 document + iframe#cafe_main)
   const docsToScan = [document];
   try {
@@ -1409,7 +1441,7 @@ function extractPageDownloadLinksInPage() {
     { service: "WoWroms", regex: /wowroms\.com\//i },
     { service: "PlanetEmu", regex: /planetemu\.net\//i },
     { service: "X-Share", regex: /x-share\.net\/[sb]\//i },
-    { service: "Google Drive", regex: /(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)/i },
+    { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
     { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
     { service: "MegaUp", regex: /megaup\.net\//i },
     { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
@@ -1428,7 +1460,7 @@ function extractPageDownloadLinksInPage() {
 
   function cleanTitle(str) {
     if (!str) return "";
-    return str.replace(/\s+/g, " ").trim();
+    return str.replace(/\s+/g, " ").replace(/^[\s▼▶▷►\-_]+/, "").trim();
   }
 
   for (const doc of docsToScan) {
