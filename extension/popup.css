@@ -574,6 +574,10 @@ body {
   background: rgba(59, 130, 246, 0.2);
   color: #60a5fa;
 }
+.tag-vimm {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+}
 .tag-rootz {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;

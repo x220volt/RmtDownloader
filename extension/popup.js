@@ -1143,6 +1143,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("romspure")) return "tag-romspure";
   if (lower.includes("wowroms")) return "tag-wowroms";
   if (lower.includes("planetemu")) return "tag-planetemu";
+  if (lower.includes("vimm")) return "tag-vimm";
   if (lower.includes("rootz")) return "tag-rootz";
   if (lower.includes("torrent") || lower.includes("마그넷")) return "tag-torrent";
   return "tag-direct";
@@ -1440,6 +1441,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
     { service: "WoWroms", regex: /wowroms\.com\//i },
     { service: "PlanetEmu", regex: /planetemu\.net\//i },
+    { service: "Vimm's Lair", regex: /vimm\.net\/vault\//i },
     { service: "X-Share", regex: /x-share\.net\/[sb]\//i },
     { service: "Google Drive", regex: /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i },
     { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
