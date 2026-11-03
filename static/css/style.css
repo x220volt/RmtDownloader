@@ -378,6 +378,11 @@ body {
   color: #38bdf8;
   border: 1px solid rgba(0, 114, 255, 0.3);
 }
+.badge-filekeeper {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
 
 .badge-rootz {
   background: rgba(16, 185, 129, 0.15);

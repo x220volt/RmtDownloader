@@ -582,6 +582,10 @@ body {
   background: rgba(0, 114, 255, 0.2);
   color: #38bdf8;
 }
+.tag-filekeeper {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
 .tag-rootz {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;
