@@ -4,7 +4,32 @@
 
 ---
 
-## [v0.1.43] - 2026-11-02
+## [v0.1.44] - 2026-11-03
+
+### 🎮 Vimm's Lair (vimm.net) 레트로 게임 ROM 다운로드 지원
+* **Vimm's Lair 전용 리졸버 신설 (`downloader/resolvers/vimm.py`)**:
+  * `vimm.net/vault/*` 및 `dl*.vimm.net` 게임 다운로드 페이지 완벽 지원.
+  * Cloudflare Turnstile 보안 검증 자동 우회 및 `submitDL` 자바스크립트의 GET 쿼리 변환 처리.
+  * 동적 발급된 토큰(`mediaId`, `token`) 및 세션 쿠키 연동을 통한 무결성 직링크 생성.
+  * 서버 `Content-Disposition` 헤더 및 페이지 타이틀 기반의 파일명/서브폴더 자동 생성.
+* **애드온 및 UI/확장 프로그램 연동 (`downloader/addons/definitions.py`, `extension/`, `static/`)**:
+  * 호스팅 애드온 `VimmAddon` 등록 (`domains=["vimm.net"]`).
+  * 웹 대시보드 배지 스타일(`.badge-vimm`) 및 크롬 확장 프로그램 서비스 감지 태그(`.tag-vimm`) 추가.
+
+### 🌐 티스토리 및 구글 드라이브(Google Drive) 공유 링크 연동 개선
+* **티스토리 본문 내 외부 클라우드 링크 자동 탐지 (`downloader/resolvers/tistory.py`)**:
+  * 티스토리 포스팅 본문에 포함된 구글 드라이브(`drive.google.com`) 등 전문 클라우드 링크 자동 감지 및 큐잉.
+  * 본문 외 사이드바/댓글/푸터 링크의 불필요한 과다 수집(수천 개 링크 폭주 버그) 방지 및 본문 영역(`article`, `.entry-content` 등) 엄격 격리.
+
+### 🧩 크롬 확장 프로그램(Chrome Companion) 큐 취소(Cancel) 기능 추가
+* **웹 UI와 큐 조작 동기화 (`extension/popup.js`, `extension/popup.html`)**:
+  * 팝업 큐 목록에 일시정지, 재개, 삭제 외 '작업 취소' 버튼 추가 및 웹 대시보드와 동일한 `cancelled` 상태 실시간 동기화 지원.
+
+### 🛡️ 전체 코드베이스 타입 안정성 및 테스트 통과
+* **Pyrefly 타입 검사 오류 0건 달성**: 타입 힌트 및 `BeautifulSoup` 파싱 반환형 검증 강화.
+* **단위 테스트 163건 전체 통과** (`OK (skipped=13)`).
+
+---
 
 ### 💾 서버 저장 디렉터리 디스크 여유 공간 및 보관 용량 표시
 * **저장 위치 하단 실시간 용량 모니터링 (`templates/index.html`, `static/css/style.css`, `static/js/app.js`, `app.py`)**:
