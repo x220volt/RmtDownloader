@@ -944,10 +944,10 @@ function createJobCard(job) {
         ${renderMetaRightHtml(job)}
       </div>
     </div>
-    ${job.error_message ? `
+    ${(job.error_message && job.status !== "downloading" && (["failed", "cancelled"].includes(job.status) || (job.status === "queued" && job.error_message.includes("재시도")))) ? `
       <div class="job-error-msg">
         <div class="job-error-header">
-          <strong>❌ 다운로드 실패</strong>
+          <strong>${job.status === "queued" ? "⚠️ 재시도 대기" : (job.error_message && job.error_message.includes("중복") ? "⚠️ 중복 다운로드 제외" : "❌ 다운로드 실패")}</strong>
           ${displaySource ? `
             <span class="job-error-source">
               [출처: ${sourceHref ? `<a href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(displaySource)} ↗</a>` : escapeHtml(displaySource)}]

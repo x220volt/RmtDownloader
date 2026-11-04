@@ -212,6 +212,9 @@ function handleServerEvent(event) {
   } else if (type === 'job_progress') {
     const job = jobsMap.get(event.data.id);
     if (job) {
+      if (event.data.error_message !== undefined) {
+        job.error_message = event.data.error_message;
+      }
       Object.assign(job, event.data);
       updateJobProgressOnly(event.data);
       recalcSpeedAndActive();
@@ -649,10 +652,10 @@ function createJobCard(job) {
         </span>
       </div>
     </div>
-    ${job.error_message ? `
+    ${(job.error_message && job.status !== 'downloading' && (['failed', 'cancelled'].includes(job.status) || (job.status === 'queued' && job.error_message.includes('재시도')))) ? `
       <div class="job-error-text">
         <div class="job-error-header">
-          <span>${job.error_message && job.error_message.includes('중복') ? '⚠️ 중복 다운로드 제외' : '❌ 다운로드 실패'}</span>
+          <span>${job.status === 'queued' ? '⚠️ 다운로드 일시 중단 (재시도 대기)' : (job.error_message && job.error_message.includes('중복') ? '⚠️ 중복 다운로드 제외' : '❌ 다운로드 실패')}</span>
           ${(job.downloaded_bytes && job.downloaded_bytes > 0) ? `<span class="job-resume-tag" title="이전에 다운로드된 데이터(${job.downloaded_str || formatBytes(job.downloaded_bytes)})가 보관되어 이어받기가 가능합니다">📦 이어받기 가능 (${job.downloaded_str || formatBytes(job.downloaded_bytes)})</span>` : ''}
           ${displaySource ? `
             <span class="job-error-source">
@@ -689,6 +692,15 @@ function updateJobProgressOnly(data) {
   const bytes = document.getElementById(`bytes-${data.id}`);
   const speed = document.getElementById(`speed-${data.id}`);
   const eta = document.getElementById(`eta-${data.id}`);
+
+  // 다운로드가 재개/진행되면 기존 실패/에러 메시지 상자를 DOM에서 즉시 제거
+  if (!data.error_message || data.error_message === '') {
+    const card = document.getElementById(`job-${data.id}`);
+    if (card) {
+      const errBox = card.querySelector('.job-error-text');
+      if (errBox) errBox.remove();
+    }
+  }
 
   if (fill) {
     fill.classList.remove('indeterminate');

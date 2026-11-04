@@ -748,6 +748,7 @@ class DownloadManager:
                 return True
             elif job.status == "queued":
                 job.status = "paused"
+                job.error_message = ""
                 self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
                 return True
@@ -764,6 +765,7 @@ class DownloadManager:
             ):
                 return False
             job.status = "queued"
+            job.error_message = ""
             self.queue.put(job.id)
             self._save_jobs()
             self._broadcast("job_updated", job.to_dict())
@@ -964,6 +966,7 @@ class DownloadManager:
                     continue
                 job.thread = threading.current_thread()
                 job.status = "resolving"
+                job.error_message = ""
                 self._save_jobs()
                 self._broadcast("job_updated", job.to_dict())
 
@@ -1107,6 +1110,7 @@ class DownloadManager:
                     if resolved.get("post_data"):
                         job.options["post_data"] = resolved["post_data"]
                     job.status = "downloading"
+                    job.error_message = ""
                     self._broadcast("job_updated", job.to_dict())
 
                 # 다중 첨부파일이 발견된 경우 (예: 네이버 카페 / 티스토리 분할 압축 등) 나머지 파일들도 큐에 자동 등록
@@ -1184,11 +1188,13 @@ class DownloadManager:
             ):
                 if job is None:
                     return
+                had_error = False
                 with self._lock:
                     if self.jobs.get(job_id) is not job or job.status != "downloading":
                         return
                     if job.error_message:
                         job.error_message = ""
+                        had_error = True
                     job.downloaded_bytes = downloaded_bytes
                     job.total_bytes = total_bytes
                     job.speed_bps = speed_bps
@@ -1216,10 +1222,14 @@ class DownloadManager:
                         job._last_save_time = now
                         self._save_jobs()
 
+                if had_error:
+                    self._broadcast("job_updated", job.to_dict())
+
                 self._broadcast(
                     "job_progress",
                     {
                         "id": job.id,
+                        "error_message": "",
                         "downloaded_bytes": downloaded_bytes,
                         "total_bytes": total_bytes,
                         "downloaded_str": format_bytes(downloaded_bytes),
