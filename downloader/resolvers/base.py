@@ -25,6 +25,8 @@ class BaseResolver(ABC):
             "cookies": "쿠키 문자열 (선택사항)",
             "referer": "리퍼러 (선택사항)",
             "source_service": "GoFile / VikingFile / Direct 등"
+            "allow_parallel": True,  # False이면 표준 엔진 사용 (선택사항)
+            "max_connections": 8,  # 사이트별 분할 연결 상한 (선택사항)
         }
         """
         pass

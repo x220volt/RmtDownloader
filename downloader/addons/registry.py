@@ -70,6 +70,14 @@ class AddonRegistry:
                 return addon
         return None
 
+    def find_task_addon(self, job: Any) -> Optional[HostingAddon]:
+        """Restore special transfers through addon capabilities, including old jobs."""
+        preferred = self.find_for_service(getattr(job, "service_name", ""))
+        if preferred and preferred.can_restore_task(job):
+            return preferred
+        return next((addon for addon in self.get_addons()
+                     if addon is not preferred and addon.can_restore_task(job)), None)
+
     def get_ui_manifest(self) -> Dict[str, Any]:
         """프론트엔드 UI(설정 모달, 뱃지 렌더링, 스타일 적용 등)를 위한 매니페스트를 반환합니다."""
         addons = self.get_addons()

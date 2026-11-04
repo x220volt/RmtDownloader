@@ -8,7 +8,7 @@ import threading
 from typing import Any, Callable, Mapping, Optional
 
 from .aria2_manager import get_aria2_path
-from .engine import sanitize_filename
+from .engine import DEFAULT_USER_AGENT, _FINALIZE_LOCK, get_unique_filename, sanitize_filename
 from .torrent_engine import parse_aria2_summary_line
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,10 @@ class Aria2HttpDownloadTask:
         self.dest_dir = dest_dir
         self.filename = sanitize_filename(filename) if filename else ""
         self.partial_id = re.sub(r"[^a-zA-Z0-9_-]", "", partial_id)
+        self._work_dir = (
+            os.path.join(dest_dir, f".aria2-{self.partial_id}")
+            if self.partial_id else dest_dir
+        )
         self.headers = dict(headers or {})
         self.cookies = cookies or ""
         self.referer = referer or ""
@@ -69,8 +73,8 @@ class Aria2HttpDownloadTask:
                 except Exception:
                     pass
         # 취소 시 불완전 파일 및 .aria2 제어 파일 정리
-        if self.filename:
-            target = os.path.join(self.dest_dir, self.filename)
+        if self.filename and not self.final_file_path:
+            target = os.path.join(self._work_dir, self.filename)
             aria2_ctrl = target + ".aria2"
             for fpath in (target, aria2_ctrl):
                 if os.path.exists(fpath):
@@ -78,6 +82,19 @@ class Aria2HttpDownloadTask:
                         os.remove(fpath)
                     except Exception:
                         pass
+
+    @staticmethod
+    def cleanup_partial(dest_dir: str, partial_id: str):
+        """Remove files only inside this job's private aria2 directory."""
+        if not partial_id or not re.fullmatch(r"[a-zA-Z0-9_-]+", partial_id):
+            return
+        folder = os.path.join(dest_dir, f".aria2-{partial_id}")
+        if not os.path.isdir(folder) or os.path.islink(folder):
+            return
+        for entry in os.scandir(folder):
+            if entry.is_file(follow_symlinks=False):
+                os.remove(entry.path)
+        os.rmdir(folder)
 
     def run(self) -> dict:
         """aria2c 프로세스를 구동하여 고속 분할 다운로드를 수행합니다."""
@@ -90,6 +107,7 @@ class Aria2HttpDownloadTask:
                 }
 
         os.makedirs(self.dest_dir, exist_ok=True)
+        os.makedirs(self._work_dir, exist_ok=True)
 
         try:
             aria2_exe = get_aria2_path()
@@ -103,7 +121,7 @@ class Aria2HttpDownloadTask:
 
         cmd = [
             aria2_exe,
-            f"--dir={self.dest_dir}",
+            f"--dir={self._work_dir}",
             "--summary-interval=1",
             "--console-log-level=notice",
             "--file-allocation=none",
@@ -114,6 +132,7 @@ class Aria2HttpDownloadTask:
             f"--max-connection-per-server={self.split}",
             "--min-split-size=1M",
             "--stream-piece-selector=default",
+            f"--user-agent={DEFAULT_USER_AGENT}",
             "--check-certificate=false",
         ]
 
@@ -136,7 +155,9 @@ class Aria2HttpDownloadTask:
         if self.headers:
             for k, v in self.headers.items():
                 k_lower = str(k).lower()
-                if k_lower in ("cookie", "referer"):
+                if (k_lower == "cookie" and self.cookies) or (
+                    k_lower == "referer" and self.referer
+                ):
                     continue
                 cmd.append(f"--header={k}: {v}")
 
@@ -283,6 +304,8 @@ class Aria2HttpDownloadTask:
                 }
             else:
                 logger.info(f"[Aria2HTTP] 다운로드 취소됨: {self.filename}")
+                if self.partial_id:
+                    self.cleanup_partial(self.dest_dir, self.partial_id)
                 return {
                     "success": False,
                     "status": "cancelled",
@@ -290,17 +313,20 @@ class Aria2HttpDownloadTask:
                 }
 
         if ret == 0:
-            final_path = os.path.join(self.dest_dir, self.filename)
-            if not os.path.exists(final_path):
-                entries = [
-                    os.path.join(self.dest_dir, x)
-                    for x in os.listdir(self.dest_dir)
-                    if not x.endswith(".aria2")
-                ]
-                if entries:
-                    latest = max(entries, key=os.path.getmtime)
-                    final_path = latest
-                    self.filename = os.path.basename(latest)
+            final_path = os.path.join(self._work_dir, self.filename)
+            if not self.filename or not os.path.isfile(final_path):
+                return {"success": False, "status": "failed",
+                        "error": "aria2c completed without the expected output file"}
+            if self.partial_id:
+                with _FINALIZE_LOCK:
+                    self.filename = get_unique_filename(self.dest_dir, self.filename)
+                    target = os.path.join(self.dest_dir, self.filename)
+                    os.replace(final_path, target)
+                    final_path = target
+                try:
+                    os.rmdir(self._work_dir)
+                except OSError:
+                    pass
 
             self.final_file_path = final_path
             if self.progress_callback:

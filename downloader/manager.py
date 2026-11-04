@@ -24,6 +24,7 @@ from .engine import (
     format_speed,
     sanitize_folder_name,
 )
+from .transfer_policy import HttpTransferPolicy
 from .resolvers.dispatcher import default_dispatcher
 from .url_helper import canonical_url_key, clean_url
 
@@ -96,7 +97,6 @@ class DownloadJob:
         self.task: Optional[Any] = None
         self.thread: Optional[threading.Thread] = None
         self._last_log_time: float = 0.0
-        self._last_save_time: float = 0.0
 
     def to_dict(self) -> dict:
         """클라이언트 전달용 직렬화 딕셔너리 반환."""
@@ -221,6 +221,7 @@ class DownloadManager:
         self._listeners: List[queue.Queue] = []
         self._worker_threads = []
         self._stop_event = threading.Event()
+        self._last_progress_save_time = 0.0
         self._completed_history: Dict[str, dict] = {}
 
         # 1. 완료 히스토리 로드
@@ -809,6 +810,9 @@ class DownloadManager:
             if part_path and os.path.exists(part_path):
                 os.remove(part_path)
                 logger.info("임시 .part 파일 정리 완료: %s", part_path)
+            from .aria2_http_engine import Aria2HttpDownloadTask
+
+            Aria2HttpDownloadTask.cleanup_partial(job.download_dir, job.id)
         except Exception as e:
             logger.warning("임시 .part 파일 정리 중 오류: %s", e)
 
@@ -1109,6 +1113,9 @@ class DownloadManager:
                         job.options["method"] = resolved["method"]
                     if resolved.get("post_data"):
                         job.options["post_data"] = resolved["post_data"]
+                    for key in ("allow_parallel", "max_connections"):
+                        if key in resolved:
+                            job.options[key] = resolved[key]
                     job.status = "downloading"
                     job.error_message = ""
                     self._broadcast("job_updated", job.to_dict())
@@ -1121,8 +1128,8 @@ class DownloadManager:
                     )
                     for extra in extra_files[1:]:
                         extra_opts = dict(job.options)
-                        for key in ("headers", "cookies", "referer"):
-                            if resolved.get(key):
+                        for key in ("headers", "cookies", "referer", "allow_parallel", "max_connections"):
+                            if key in resolved:
                                 extra_opts[key] = resolved[key]
                         extra_opts["subfolder_applied"] = True
                         if "referer" in extra:
@@ -1217,9 +1224,11 @@ class DownloadManager:
                             job.speed_str,
                             job.eta_str,
                         )
-                    last_save = getattr(job, "_last_save_time", 0.0)
-                    if now - last_save >= 15.0:
-                        job._last_save_time = now
+                    # Each checkpoint serializes every job. Share the interval
+                    # across workers to avoid N full writes every 15 seconds.
+                    checkpoint_time = time.monotonic()
+                    if checkpoint_time - self._last_progress_save_time >= 15.0:
+                        self._last_progress_save_time = checkpoint_time
                         self._save_jobs()
 
                 if had_error:
@@ -1267,99 +1276,33 @@ class DownloadManager:
 
             task_exc = None
             use_aria2 = False
-            method = "GET"
-            post_data = None
             try:
                 if resolved.get("task_factory"):
                     task = resolved["task_factory"](job, job.download_dir, on_progress)
                 else:
                     from .addons import addon_registry
 
-                    addon = addon_registry.find_for_service(job.service_name)
-                    if addon and addon.can_restore_task(job):
+                    addon = addon_registry.find_task_addon(job)
+                    if addon:
                         task = addon.restore_task(job, on_progress, settings)
-                    elif job.options.get("mega_file_id") and job.options.get(
-                        "mega_key_a32"
-                    ):
-                        from .resolvers.mega import MegaDownloadTask
-
-                        task = MegaDownloadTask(
-                            url=job.resolved_url or job.original_url,
-                            dest_dir=job.download_dir,
-                            filename=job.filename,
-                            partial_id=job.id,
-                            file_id=job.options.get("mega_file_id"),
-                            key_a32=job.options.get("mega_key_a32"),
-                            file_size=job.options.get("mega_file_size"),
-                            chunk_size=settings.get("chunk_size_kb", 512) * 1024,
-                            progress_callback=on_progress,
-                        )
-                    elif job.options.get("node_handle") and job.options.get("node_key"):
-                        from .resolvers.transferit import TransferitDownloadTask
-
-                        task = TransferitDownloadTask(
-                            url=job.resolved_url,
-                            dest_dir=job.download_dir,
-                            filename=job.filename,
-                            partial_id=job.id,
-                            password=job.options.get("password"),
-                            node_handle=job.options.get("node_handle"),
-                            node_key=job.options.get("node_key"),
-                            node_size=job.options.get("node_size"),
-                            pw_token=job.options.get("pw_token"),
-                            xh=job.options.get("xh"),
-                            chunk_size=settings.get("chunk_size_kb", 512) * 1024,
-                            progress_callback=on_progress,
-                        )
                     else:
-                        aria2_http_enabled = settings.get("aria2_http_enabled", False)
-                        aria2_http_split = max(1, min(16, int(settings.get("aria2_http_split", 8))))
-                        method = (resolved.get("method") or job.options.get("method", "GET")).upper()
-                        post_data = resolved.get("post_data") or job.options.get("post_data")
-
-                        use_aria2 = (
-                            aria2_http_enabled
-                            and method == "GET"
-                            and not post_data
-                            and bool(job.resolved_url)
-                            and job.resolved_url.lower().startswith(("http://", "https://"))
-                        )
+                        policy = HttpTransferPolicy.from_job(job, resolved, settings)
+                        use_aria2 = policy.use_aria2
 
                         if use_aria2:
                             from .aria2_http_engine import Aria2HttpDownloadTask
 
                             task = Aria2HttpDownloadTask(
-                                url=job.resolved_url,
-                                dest_dir=job.download_dir,
-                                filename=job.filename,
-                                partial_id=job.id,
-                                headers=resolved.get("headers")
-                                or job.options.get("headers"),
-                                cookies=resolved.get("cookies")
-                                or job.options.get("cookies"),
-                                referer=resolved.get("referer")
-                                or job.options.get("referer"),
-                                split=aria2_http_split,
+                                **policy.request_kwargs,
+                                split=policy.split,
                                 progress_callback=on_progress,
                                 status_callback=on_status,
                             )
                         else:
                             task = DownloadTask(
-                                url=job.resolved_url,
-                                dest_dir=job.download_dir,
-                                filename=job.filename,
-                                partial_id=job.id,
-                                headers=resolved.get("headers")
-                                or job.options.get("headers"),
-                                cookies=resolved.get("cookies")
-                                or job.options.get("cookies"),
-                                referer=resolved.get("referer")
-                                or job.options.get("referer"),
-                                chunk_size=settings.get("chunk_size_kb", 256) * 1024,
+                                **policy.standard_kwargs,
                                 progress_callback=on_progress,
                                 status_callback=on_status,
-                                method=method,
-                                post_data=post_data,
                             )
                 with self._lock:
                     if self.jobs.get(job_id) is not job or job.status != "downloading":
@@ -1384,26 +1327,24 @@ class DownloadManager:
                     )
                     on_status("고속 분할 다운로드 실패 -> 표준 엔진으로 자동 전환 중...")
                     fallback_task = DownloadTask(
-                        url=job.resolved_url,
-                        dest_dir=job.download_dir,
-                        filename=job.filename,
-                        partial_id=job.id,
-                        headers=resolved.get("headers")
-                        or job.options.get("headers"),
-                        cookies=resolved.get("cookies")
-                        or job.options.get("cookies"),
-                        referer=resolved.get("referer")
-                        or job.options.get("referer"),
-                        chunk_size=settings.get("chunk_size_kb", 256) * 1024,
+                        **policy.standard_kwargs,
                         progress_callback=on_progress,
                         status_callback=on_status,
-                        method=method,
-                        post_data=post_data,
                     )
                     with self._lock:
-                        if self.jobs.get(job_id) is job and job.status == "downloading":
-                            job.task = fallback_task
+                        if self.jobs.get(job_id) is not job or job.status != "downloading":
+                            job.thread = None
+                            self.queue.task_done()
+                            continue
+                        job.task = fallback_task
                     result = fallback_task.run()
+                    if isinstance(result, dict) and result.get("success"):
+                        from .aria2_http_engine import Aria2HttpDownloadTask
+
+                        try:
+                            Aria2HttpDownloadTask.cleanup_partial(job.download_dir, job.id)
+                        except OSError as cleanup_error:
+                            logger.warning("aria2 임시 파일 정리 실패: %s", cleanup_error)
                 if not isinstance(result, dict):
                     raise ValueError("Download task returned an invalid result")
                 # DownloadTask reports failures as results rather than exceptions.

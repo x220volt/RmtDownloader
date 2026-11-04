@@ -1,5 +1,6 @@
 """HTTP 스트리밍 및 이어받기 지원 내장 다운로드 엔진."""
 
+import glob
 import logging
 import mimetypes
 import os
@@ -256,7 +257,7 @@ class DownloadTask:
             else:
                 req_headers["Cookie"] = self.cookies
 
-        # 1. 파일명이 미리 정해지지 않았다면 HEAD 요청으로 파일명 및 크기 확인
+        # 1. 요청 세션 및 재개할 임시 파일 확인
         session = requests.Session()
         session.headers.update(req_headers)
 
@@ -278,7 +279,13 @@ class DownloadTask:
                 allow_redirects=True,
             )
 
-        if not self.filename and self.method == "GET":
+        # A fresh GET already supplies filename/size headers. Only probe when
+        # an unnamed resumed task may need to locate a previously named partial.
+        partial_suffix = f".{self.partial_id}.part" if self.partial_id else ".part"
+        needs_resume_probe = not self.filename and bool(
+            glob.glob(os.path.join(glob.escape(self.dest_dir), "*" + partial_suffix))
+        )
+        if needs_resume_probe and self.method == "GET":
             try:
                 head_resp = session.head(
                     self.url,
