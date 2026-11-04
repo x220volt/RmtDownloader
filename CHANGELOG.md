@@ -4,6 +4,35 @@
 
 ---
 
+## [v0.1.45] - 2026-11-04
+
+### ☁️ 신규 해외 클라우드 & 파일 호스팅 서비스 3종 지원
+* **MediaFire (mediafire.com) 다운로드 지원 (`downloader/resolvers/mediafire.py`)**:
+  * `mediafire.com/file/*`, `/download/*`, `/view/*`, 직링크(`download*.mediafire.com`) 완벽 지원.
+  * 고속 직링크 파싱, 세션 헤더/쿠키 보존 및 Cloudflare 스텔스 브라우저 폴백.
+  * 호스팅 애드온 `MediaFireAddon` 등록 및 전용 배지 스타일(`.badge-mediafire`, `.tag-mediafire`) 연동.
+* **FileKeeper (filekeeper.net) 다운로드 지원 (`downloader/resolvers/filekeeper.py`)**:
+  * `filekeeper.net/[코드]`, `filekeeper.net/[코드]/[파일명]`, `edge*.fetchio.cc` 직링크 완벽 지원.
+  * `#download-countdown` 메타데이터 및 `op=download2` 자동 POST 전송을 통한 302 고속 직링크 즉시 발급.
+  * 분할 압축 파일 서브폴더 자동 정리 및 스텔스 브라우저 폴백 지원.
+  * 호스팅 애드온 `FileKeeperAddon` 등록 및 에메랄드 전용 배지 스타일(`.badge-filekeeper`, `.tag-filekeeper`) 연동.
+* **DataNodes (datanodes.to) 다운로드 지원 (`downloader/resolvers/datanodes.py`)**:
+  * `datanodes.to/[코드]`, `datanodes.to/[코드]/[파일명]`, `*.dlproxy.uk` 직링크 완벽 지원.
+  * 2단계 양식 제출 및 네트워크 패킷 분석, DrissionPage 스텔스 세션을 통한 Cloudflare Turnstile 캡차 자동 통과.
+  * 타이머 경과 후 브라우저 컨텍스트 직링크 발급 및 멀티 파트 서브폴더 자동 생성.
+  * 호스팅 애드온 `DataNodesAddon` 등록 및 블루 전용 배지 스타일(`.badge-datanodes`, `.tag-datanodes`) 연동.
+
+### 🧩 크롬 확장 프로그램 및 페이지 스캐너 기능 개선
+* **`<form>` POST 제출 방식의 ROM/호스팅 페이지 자동 감지 (`extension/popup.js`)**:
+  * PlanetEmu, Vimm's Lair, Romspure, WoWroms 등 폼 제출 버튼을 사용하는 다운로드 페이지를 페이지 스캐너가 즉시 감지하여 1클릭 다운로드 큐잉 지원.
+  * PlanetEmu 게임 타이틀 및 서브폴더 경로 정제 로직 개선.
+
+### 🛡️ 품질 검증 및 신뢰성 강화
+* **Pyrefly 타입 검사 오류 0건 유지**.
+* **전체 단위 테스트 178건 100% 통과** (`OK (skipped=13)`).
+
+---
+
 ## [v0.1.44] - 2026-11-03
 
 ### 🎮 Vimm's Lair (vimm.net) 레트로 게임 ROM 다운로드 지원

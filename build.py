@@ -129,6 +129,18 @@ def build_extension_zip(version_tag: str) -> Path:
     print(
         f"[OK] 크롬 확장 프로그램 패키징 완료: {default_zip.name} ({size_kb:.1f} KB)"
     )
+
+    doc_ext_dir = Path.home() / "Documents" / "RemoteDownloader-Extension"
+    if doc_ext_dir.exists():
+        for root, _dirs, files in os.walk(EXT_DIR):
+            for file in files:
+                src_path = os.path.join(root, file)
+                rel_path = os.path.relpath(src_path, EXT_DIR)
+                dst_path = doc_ext_dir / rel_path
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dst_path)
+        print(f"[OK] 문서 폴더 확장 프로그램 동기화 완료: {doc_ext_dir}")
+
     return default_zip
 
 
