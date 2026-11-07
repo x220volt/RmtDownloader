@@ -1,5 +1,6 @@
 """aria2c 기반 HTTP/HTTPS 고속 분할(멀티 커넥션) 다운로드 엔진."""
 
+import collections
 import logging
 import os
 import re
@@ -134,6 +135,7 @@ class Aria2HttpDownloadTask:
             "--stream-piece-selector=default",
             f"--user-agent={DEFAULT_USER_AGENT}",
             "--check-certificate=false",
+            "--disable-ipv6=true",
         ]
 
         if self.filename:
@@ -204,6 +206,7 @@ class Aria2HttpDownloadTask:
         proc_stdout = self._process.stdout
         last_dl_bytes = 0
         last_tot_bytes = 0
+        recent_lines = collections.deque(maxlen=15)
 
         readline_func = getattr(proc_stdout, "readline", None)
         lines_iter = iter(readline_func, "") if callable(readline_func) else proc_stdout
@@ -222,8 +225,9 @@ class Aria2HttpDownloadTask:
                 line = str(raw_line).strip()
                 if not line:
                     continue
+                recent_lines.append(line)
 
-                # 1. 파일명 감지 (FILE: path/filename)
+                # 1. 파일명 감지 (FILE: path/filename 또는 Download complete: path)
                 if line.startswith("FILE:"):
                     clean_name = re.sub(
                         r"^FILE:\s*(\[MEMORY\])?(\[METADATA\])?", "", line
@@ -231,7 +235,16 @@ class Aria2HttpDownloadTask:
                     extracted_base = os.path.basename(clean_name)
                     if extracted_base and extracted_base != self.filename:
                         self.filename = sanitize_filename(extracted_base)
-                        logger.info(f"[Aria2HTTP] 파일명 감지: {self.filename}")
+                        logger.info(f"[Aria2HTTP] 파일명 감지 (FILE): {self.filename}")
+                elif "Download complete:" in line:
+                    m_comp = re.search(r"Download complete:\s*(.+)$", line)
+                    if m_comp:
+                        extracted_base = os.path.basename(
+                            m_comp.group(1).strip().replace("\\", "/")
+                        )
+                        if extracted_base and extracted_base != self.filename:
+                            self.filename = sanitize_filename(extracted_base)
+                            logger.info(f"[Aria2HTTP] 파일명 감지 (Complete): {self.filename}")
 
                 # 2. 진행 상태 요약 파싱
                 parsed = parse_aria2_summary_line(line)
@@ -313,10 +326,30 @@ class Aria2HttpDownloadTask:
                 }
 
         if ret == 0:
-            final_path = os.path.join(self._work_dir, self.filename)
+            final_path = (
+                os.path.join(self._work_dir, self.filename) if self.filename else ""
+            )
+            # 파일명이 지정되지 않았거나 aria2c가 Content-Disposition/리다이렉션으로 다른 이름으로 저장한 경우 탐색
+            if not final_path or not os.path.isfile(final_path):
+                if (self.partial_id or not self.filename) and os.path.isdir(self._work_dir):
+                    candidates = [
+                        os.path.join(self._work_dir, f)
+                        for f in os.listdir(self._work_dir)
+                        if not f.endswith(".aria2")
+                        and os.path.isfile(os.path.join(self._work_dir, f))
+                    ]
+                    if candidates:
+                        latest = max(candidates, key=os.path.getmtime)
+                        final_path = latest
+                        self.filename = sanitize_filename(os.path.basename(latest))
+                        logger.info(f"[Aria2HTTP] 완료 파일 자동 매칭: {self.filename}")
+
             if not self.filename or not os.path.isfile(final_path):
-                return {"success": False, "status": "failed",
-                        "error": "aria2c completed without the expected output file"}
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "error": "aria2c completed without the expected output file",
+                }
             if self.partial_id:
                 with _FINALIZE_LOCK:
                     self.filename = get_unique_filename(self.dest_dir, self.filename)
@@ -349,11 +382,12 @@ class Aria2HttpDownloadTask:
                 "total_bytes": last_tot_bytes or last_dl_bytes,
             }
         else:
+            err_details = " | ".join(recent_lines) if recent_lines else "내용 없음"
             logger.error(
-                f"[Aria2HTTP] aria2c 프로세스가 오류 코드 {ret}로 종료되었습니다."
+                f"[Aria2HTTP] aria2c 프로세스가 오류 코드 {ret}로 종료되었습니다. (세부: {err_details})"
             )
             return {
                 "success": False,
                 "status": "failed",
-                "error": f"aria2c 프로세스 종료 오류 (코드 {ret})",
+                "error": f"aria2c 프로세스 종료 오류 (코드 {ret}): {err_details}",
             }

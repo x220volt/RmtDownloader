@@ -9,6 +9,7 @@ from .services.vikingfile import VikingFileAddon
 from .services.mediafire import MediaFireAddon
 from .services.filekeeper import FileKeeperAddon
 from .services.datanodes import DataNodesAddon
+from .services.buzzheavier import BuzzheavierAddon
 from .services.megaup import MegaUpAddon
 from .services.terabox import TeraBoxAddon
 from .services.gigafile import GigaFileAddon
@@ -32,6 +33,7 @@ from .services.webpage import WebPageAddon
 from .services.direct import DirectAddon
 
 __all__ = [
+    "BuzzheavierAddon",
     "DataNodesAddon",
     "DirectAddon",
     "FileKeeperAddon",
@@ -84,6 +86,7 @@ def register_default_addons(registry) -> None:
         MediaFireAddon(),
         FileKeeperAddon(),
         DataNodesAddon(),
+        BuzzheavierAddon(),
         XShareAddon(),
         RomsfunAddon(),
         RomspureAddon(),

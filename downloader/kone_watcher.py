@@ -237,6 +237,20 @@ class KoneWatcher:
                     except OSError:
                         pass
 
+    def mark_post_seen(self, post_id_or_url: str):
+        """지정된 게시글 ID 또는 URL을 이미 확인 완료된 게시글로 등록합니다."""
+        if not post_id_or_url:
+            return
+        m = re.search(r"/s/[^/]+/([a-zA-Z0-9_-]{10,})", post_id_or_url)
+        post_id = m.group(1) if m else post_id_or_url.strip()
+        if not post_id:
+            return
+        with self._lock:
+            if post_id not in self._seen_posts:
+                self._seen_posts[post_id] = None
+                self._save_seen_posts()
+                logger.debug("Kone.gg 게시글 확인 완료 수동 등록: %s", post_id)
+
     def start(self):
         """백그라운드 감시 루프 스레드를 시작합니다."""
         with self._lock:
@@ -593,6 +607,7 @@ class KoneWatcher:
                                 "status": status_code,
                                 "message": status_msg,
                             }
+                        self._save_seen_posts()
                 except Exception as e:
                     logger.warning(
                         "Kone.gg 게시글 [%s] 처리 중 오류: %s", post_title, e

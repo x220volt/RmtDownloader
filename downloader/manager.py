@@ -313,6 +313,9 @@ class DownloadManager:
 
     def _load_history(self):
         """이전에 다운로드 완료된 URL 히스토리를 로드합니다."""
+        is_testing = "unittest" in sys.modules or "pytest" in sys.modules
+        if is_testing and HISTORY_FILE == CONFIG_DIR / "download_history.json":
+            return
         with self._lock:
             if HISTORY_FILE.exists():
                 try:
@@ -338,6 +341,9 @@ class DownloadManager:
 
     def _save_history(self):
         """다운로드 히스토리를 원자적으로 파일에 저장합니다."""
+        is_testing = "unittest" in sys.modules or "pytest" in sys.modules
+        if is_testing and HISTORY_FILE == CONFIG_DIR / "download_history.json":
+            return
         with self._lock:
             temp_path = None
             try:
@@ -409,6 +415,22 @@ class DownloadManager:
 
                     # 상태별 분기
                     if job.status in ("downloading", "resolving", "queued"):
+                        # 이미 완료 히스토리에 기록되어 있는 작업이면 중복 다운로드 방지 -> completed로 보정
+                        c_key = canonical_url_key(job.original_url)
+                        if c_key and c_key in self._completed_history:
+                            job.status = "completed"
+                            job.speed_bps = 0.0
+                            job.speed_str = "0 KB/s"
+                            job.eta_seconds = None
+                            job.eta_str = "완료"
+                            job.task = None
+                            job.thread = None
+                            self.jobs[job.id] = job
+                            logger.info(
+                                f"서버 재시작 감지: 이미 완료된 작업 확인 (ID={job.id}, 파일명={job.filename or '미정'}) -> 대기열 복원 제외"
+                            )
+                            continue
+
                         # 서버 종료 시점에 진행 중이거나 대기 중이던 작업 -> 이어받기 자동 재개
                         job.status = "queued"
                         job.speed_bps = 0.0
@@ -642,8 +664,8 @@ class DownloadManager:
             raise ValueError("A valid download URL is required")
 
         settings = self.settings_getter()
-        should_check_dup = skip_duplicate and bool(
-            settings.get("check_duplicate_url", True)
+        should_check_dup = is_auto or (
+            skip_duplicate and bool(settings.get("check_duplicate_url", True))
         )
 
         download_dir = settings.get("download_dir")
@@ -698,8 +720,8 @@ class DownloadManager:
         is_auto: bool = False,
     ) -> List[DownloadJob]:
         """여러 URL을 일괄 추가합니다 (force=False 시 중복 링크는 자동 제외)."""
-        check_dup = not force and bool(
-            self.settings_getter().get("check_duplicate_url", True)
+        check_dup = not force and (
+            is_auto or bool(self.settings_getter().get("check_duplicate_url", True))
         )
         added = []
         for item in urls:
@@ -791,11 +813,16 @@ class DownloadManager:
         """작업의 임시 .part 파일 경로를 찾습니다."""
         if not job.download_dir or not os.path.isdir(job.download_dir):
             return None
-        # 1. job.id 기반 part 파일 탐색
-        pattern = os.path.join(job.download_dir, f"*.{job.id}.part")
-        matches = glob.glob(pattern)
-        if matches and os.path.isfile(matches[0]):
-            return matches[0]
+        # 1. job.id 기반 part 파일 탐색 (폴더명에 [], () 등 특수문자가 포함되어도 안전하도록 os.listdir 사용)
+        target_suffix = f".{job.id}.part"
+        try:
+            for fname in os.listdir(job.download_dir):
+                if fname.endswith(target_suffix):
+                    full_p = os.path.join(job.download_dir, fname)
+                    if os.path.isfile(full_p):
+                        return full_p
+        except OSError:
+            pass
         # 2. filename 기반 part 파일 탐색
         if job.filename:
             direct_part = os.path.join(job.download_dir, f"{job.filename}.part")

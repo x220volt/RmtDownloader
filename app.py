@@ -461,6 +461,14 @@ def add_jobs():
     )
 
     if candidates:
+        if source_url or single_referer:
+            ref_kone = source_url or single_referer
+            if "kone.gg/s/" in ref_kone:
+                try:
+                    kone_watcher.mark_post_seen(ref_kone)
+                except Exception:
+                    pass
+
         if capture_page is not None:
             for c in candidates:
                 c.setdefault("options", {})["capture_page"] = capture_page
@@ -1733,7 +1741,41 @@ def print_banner(host, port, local_ips, username, password):
     print(line + "\n")
 
 
+_single_instance_lock = None
+
+
+def ensure_single_instance():
+    """중복 실행 방지: 동일 머신에서 이미 서버가 실행 중이면 즉시 경고 후 종료합니다."""
+    global _single_instance_lock
+    if sys.platform == "win32":
+        import ctypes
+
+        mutex_name = "Local\\RemoteDownloader_SingleInstance_Mutex"
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+        if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            print("\n" + "=" * 65)
+            print("⚠️  [경고] 원격 다운로더 (Remote Downloader)가 이미 실행 중입니다!")
+            print("    다른 터미널 창 또는 백그라운드 프로세스에서 서버가 이미 동작하고 있습니다.")
+            print("    중복 실행으로 인한 다운로드 이중 발생 및 파일 손상을 방지하기 위해")
+            print("    현재 프로세스를 즉시 종료합니다. 기존 서버를 확인해 주세요.")
+            print("=" * 65 + "\n")
+            sys.exit(1)
+        _single_instance_lock = handle
+    else:
+        import fcntl
+
+        lock_path = Path.home() / ".remote_downloader.lock"
+        try:
+            f = open(lock_path, "w")
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _single_instance_lock = f
+        except (BlockingIOError, OSError):
+            print("\n⚠️ [경고] 원격 다운로더가 이미 실행 중입니다. 중복 프로세스를 종료합니다.\n")
+            sys.exit(1)
+
+
 if __name__ == "__main__":
+    ensure_single_instance()
     settings = load_settings()
     host = str(settings.get("host", "0.0.0.0"))
     port = int(settings.get("port", 7971))

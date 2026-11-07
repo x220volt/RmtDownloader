@@ -181,3 +181,82 @@ class TransferIOTests(unittest.TestCase):
             Aria2HttpDownloadTask.cleanup_partial(folder, "../two")
             self.assertFalse(staging.exists())
             self.assertEqual(final.read_bytes(), b"complete")
+
+    @patch("downloader.aria2_http_engine.get_aria2_path", return_value="aria2c")
+    def test_aria2_command_includes_disable_ipv6(self, _):
+        with tempfile.TemporaryDirectory() as folder:
+            task = Aria2HttpDownloadTask("https://example.com/a", folder)
+            with patch(
+                "downloader.aria2_http_engine.subprocess.Popen",
+                return_value=self.process(),
+            ) as popen:
+                task.run()
+            command = popen.call_args.args[0]
+            self.assertIn("--disable-ipv6=true", command)
+
+    @patch("downloader.aria2_http_engine.get_aria2_path", return_value="aria2c")
+    def test_aria2_matches_output_when_filename_was_empty(self, _):
+        with tempfile.TemporaryDirectory() as folder:
+            staging = Path(folder) / ".aria2-job123"
+            staging.mkdir()
+            (staging / "downloaded_file.zip").write_bytes(b"content")
+            task = Aria2HttpDownloadTask(
+                "https://example.com/a", folder, filename="", partial_id="job123"
+            )
+            with patch(
+                "downloader.aria2_http_engine.subprocess.Popen",
+                return_value=self.process(),
+            ):
+                result = task.run()
+            self.assertTrue(result["success"])
+            self.assertEqual(result["filename"], "downloaded_file.zip")
+            self.assertTrue((Path(folder) / "downloaded_file.zip").exists())
+
+    def test_auto_download_always_checks_duplicates_even_if_setting_false(self):
+        with tempfile.TemporaryDirectory() as folder:
+            dm = DownloadManager(
+                settings_getter=lambda: {
+                    "download_dir": folder,
+                    "check_duplicate_url": False,
+                }
+            )
+            url = "https://example.com/item.zip"
+            # 1. 수동 추가 (check_duplicate_url=False이므로 중복 허용)
+            job1 = dm.add_url(url, is_auto=False)
+            self.assertIsNotNone(job1)
+            # 2. 자동 추가 (is_auto=True이므로 check_duplicate_url=False여도 중복 감지 및 차단)
+            job2 = dm.add_url(url, is_auto=True)
+            self.assertIsNone(job2)
+
+    def test_server_restart_does_not_requeue_completed_jobs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            dm = DownloadManager(
+                settings_getter=lambda: {
+                    "download_dir": folder,
+                    "check_duplicate_url": True,
+                }
+            )
+            job_url = "https://example.com/completed.zip"
+            # 완료 히스토리에 수동 등록
+            from downloader.url_helper import canonical_url_key
+            dm._completed_history[canonical_url_key(job_url)] = {"url": job_url}
+
+            # jobs_file에 downloading 상태인 더미 job 저장
+            jobs_file = Path(folder) / "test_jobs.json"
+            dm.jobs_file = jobs_file
+            dm._should_persist = True
+            job = DownloadJob(url=job_url, download_dir=folder)
+            job.status = "downloading"
+            dm.jobs[job.id] = job
+            dm._save_jobs()
+
+            # 매니저의 메모리 큐/작업 초기화 후 _load_jobs 실행
+            dm.jobs.clear()
+            while not dm.queue.empty():
+                dm.queue.get_nowait()
+
+            dm._load_jobs()
+            # 이미 완료된 작업이므로 큐에 다시 들어가지 않고 completed로 보정되어야 함
+            self.assertEqual(dm.queue.qsize(), 0)
+            self.assertEqual(dm.jobs[job.id].status, "completed")
+

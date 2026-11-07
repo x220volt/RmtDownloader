@@ -4,6 +4,34 @@
 
 ---
 
+## [v0.1.47] - 2026-11-07
+
+### ☁️ 신규 해외 클라우드 호스팅 Buzzheavier 지원
+* **Buzzheavier (buzzheavier.com, bzzhr.to) 다운로드 지원 (`downloader/resolvers/buzzheavier.py`)**:
+  * `buzzheavier.com/[코드]`, `bzzhr.to/[코드]`, `ts.buzzheavier.com/d/[코드]` 직링크 다운로드 완벽 지원.
+  * 빠른 HTML 파싱(`ts.*` 다운로드 엔드포인트 추출) 및 Cloudflare Turnstile/차단 시 DrissionPage 스텔스 브라우저 세션 자동 폴백.
+  * 호스팅 애드온 `BuzzheavierAddon` 등록 및 오렌지 배지 스타일(`.badge-buzzheavier`, `.tag-buzzheavier`) 추가.
+
+### 🛡️ 서버 중복 실행 방지 및 다운로드 엔진 안정화
+* **Windows 단일 인스턴스 뮤텍스 적용 (`app.py`)**:
+  * `Local\RemoteDownloader_SingleInstance_Mutex` 커널 뮤텍스를 등록하여 서버 프로세스가 백그라운드나 터미널에서 이중 실행되는 현상 방지.
+  * 이미 서버가 실행 중인 경우 포트 충돌 및 작업 파일 덮어쓰기 없이 즉시 종료.
+* **특수문자(대괄호 `[...]`) 포함 디렉터리 이어받기 경로 버그 수정 (`downloader/manager.py`)**:
+  * 폴더명에 `[NSW]` 등 대괄호가 포함되었을 때 `glob.glob`이 정규식 문자셋으로 해석하여 기존 `.part` 파일을 감지하지 못하고 파일명 중복(`(1).ext`)이 발생하던 문제를 `os.listdir` 기반 탐색으로 교체하여 완벽 해결.
+* **기존 부분 다운로드(.part) 파일 자동 수용 (`downloader/engine.py`)**:
+  * 다운로드 재개 시 작업 디렉터리에 남아있는 동일 파일명의 `.part` 파일을 자동 감지하여 이어받기(`Range: bytes=...`)로 즉시 연결.
+* **aria2c 엔진 안정성 개선 (`downloader/aria2_http_engine.py`)**:
+  * IPv6 연결 실패로 인한 지연 방지를 위해 `--disable-ipv6=true` 옵션 추가.
+  * 다운로드 완료 후 `.aria2` 디렉터리 내 실제 생성된 결과 파일명을 자동 매칭하여 안전하게 대상 디렉터리로 이동.
+* **KoneWatcher 중복 URL 등록 방지 강화 (`downloader/kone_watcher.py`)**:
+  * 이미 활성 다운로드 중인 URL에 대해 중복 작업 등록을 차단하여 불필요한 이중 다운로드 방지.
+
+### 🧪 단위 테스트 검증
+* Buzzheavier 파서, URL 유효성 검사, Direct URL 추출 및 호스팅 애드온 단위 테스트 6건 추가.
+* 전체 단위 테스트 197건 100% 통과 (`OK (skipped=13)`).
+
+---
+
 ## [v0.1.46] - 2026-11-04
 
 ### ⚡ 다운로드 전송 엔진 최적화 및 모듈 구조 리팩토링

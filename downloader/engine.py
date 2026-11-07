@@ -320,6 +320,27 @@ class DownloadTask:
         part_path = target_path + (
             f".{self.partial_id}.part" if self.partial_id else ".part"
         )
+        if not os.path.exists(part_path) and os.path.isdir(self.dest_dir):
+            # 이전에 다른 작업 ID로 다운로드 중이던 동일 파일명의 .part 임시 파일이 있다면 이어받기 위해 탐색
+            best_part = None
+            best_size = 0
+            for cand in os.listdir(self.dest_dir):
+                if cand.startswith(dest_filename) and cand.endswith(".part"):
+                    cand_full = os.path.join(self.dest_dir, cand)
+                    if os.path.isfile(cand_full):
+                        c_sz = os.path.getsize(cand_full)
+                        if c_sz > best_size:
+                            best_size = c_sz
+                            best_part = cand_full
+            if best_part and best_size > 0:
+                try:
+                    os.replace(best_part, part_path)
+                    logger.info(
+                        f"이전 임시 다운로드 파일 계승({best_size:,} bytes): {best_part} -> {part_path}"
+                    )
+                except Exception as e:
+                    logger.debug(f"임시 파일 계승 실패 ({e}), 기존 파일 사용: {best_part}")
+                    part_path = best_part
 
         # 2. 스트리밍 다운로드 및 자동 이어받기 재시도 루프
         MAX_RETRIES = self.max_retries
