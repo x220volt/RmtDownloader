@@ -347,12 +347,14 @@ class TransferitResolver(BaseResolver):
                 "filename": opts.get("filename", ""),
                 "source_service": "Transfer.it",
             }
-        from ..url_helper import get_candidate_passwords
+        from ..url_helper import get_candidate_passwords, parse_password_list
 
         candidates = get_candidate_passwords(url, opts)
-        manual_pwd = (
+        raw_manual = (
             opts.get("password") or opts.get("pwd") or opts.get("code") or ""
-        ).strip() or None
+        ).strip()
+        parsed_manual = parse_password_list(raw_manual)
+        manual_pwd = parsed_manual[0] if parsed_manual else None
 
         api = MegaAPI()
         try:

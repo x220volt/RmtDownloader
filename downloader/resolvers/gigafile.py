@@ -51,9 +51,13 @@ class GigaFileResolver(BaseResolver):
                 dlkey = qs[k][0].strip()
                 break
         if not dlkey:
-            dlkey = (
+            from ..url_helper import parse_password_list
+
+            raw_pwd = (
                 opts.get("password") or opts.get("dlkey") or opts.get("pwd") or ""
             ).strip()
+            parsed_pwds = parse_password_list(raw_pwd)
+            dlkey = parsed_pwds[0] if parsed_pwds else ""
 
         # 2. 기가파일 다운로드 안내 페이지 접속 및 세션 쿠키 수집
         with requests.Session() as session:

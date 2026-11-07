@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.49') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.50') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.49') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.50') }}</p>
         </div>
       </div>
 
@@ -423,7 +423,7 @@
               </p>
               <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
                 <div style="font-size: 0.83rem;">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.49') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.50') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -450,10 +450,10 @@
 
               <div class="form-group" style="margin-bottom: 12px;">
                 <label class="form-label" for="settingAutoPasswords">사전 등록 비밀번호 목록 (공통 자동 대입)</label>
-                <input type="text" id="settingAutoPasswords" class="form-input" placeholder="예: 1234, abcd, 2026, 7777 (쉼표, 세미콜론, 줄바꿈 또는 띄어쓰기로 구분)" autocomplete="off">
+                <textarea id="settingAutoPasswords" class="form-input" rows="2" placeholder="예: 1234, abcd, 2026, 7777 (쉼표, 세미콜론, 줄바꿈 또는 띄어쓰기로 여러 개 입력)" style="resize: vertical; font-family: inherit; font-size: 0.85rem; line-height: 1.5;"></textarea>
                 <input type="hidden" id="settingTeraboxPassword">
                 <span class="form-help">
-                  쉼표(,), 세미콜론(;), 줄바꿈, 띄어쓰기로 여러 개의 암호를 등록할 수 있습니다. (왼쪽부터 1순위로 시도)
+                  쉼표(,), 세미콜론(;), 줄바꿈, 띄어쓰기로 여러 개의 암호를 등록할 수 있습니다. (왼쪽/위에서부터 1순위로 순차 시도)
                 </span>
               </div>
 
@@ -932,6 +932,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.49') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.50') }}"></script>
 </body>
 </html>

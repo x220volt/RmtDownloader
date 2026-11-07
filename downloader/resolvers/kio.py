@@ -119,8 +119,16 @@ class KioResolver(BaseResolver):
 
     def resolve(self, url: str, options: dict | None = None) -> dict:
         import cbor2
+        from ..url_helper import get_candidate_passwords, parse_password_list
 
-        clean_url, pwd = _extract_kio_pwd(url, options)
+        clean_url, raw_pwd = _extract_kio_pwd(url, options)
+        parsed_manual = parse_password_list(raw_pwd)
+        manual_pwd = parsed_manual[0] if parsed_manual else ""
+
+        pwd_candidates = get_candidate_passwords(url, options)
+        if manual_pwd and manual_pwd not in pwd_candidates:
+            pwd_candidates.insert(0, manual_pwd)
+
         raw_id = _extract_kio_id(clean_url)
         if not raw_id:
             raise ValueError(
@@ -159,53 +167,84 @@ class KioResolver(BaseResolver):
                 "Accept": "application/cbor",
             }
 
-            coll_payload: dict[str, Any] = {"uuid": uuid_bytes}
-            if pwd:
-                coll_payload["protector"] = [
-                    {
-                        "type": "password",
-                        "data": {"password": pwd},
-                    }
-                ]
+            def _query_collection(try_pwd: str | None) -> tuple[int, dict | None]:
+                coll_payload: dict[str, Any] = {"uuid": uuid_bytes}
+                if try_pwd:
+                    coll_payload["protector"] = [
+                        {
+                            "type": "password",
+                            "data": {"password": try_pwd},
+                        }
+                    ]
+                logger.info(
+                    f"kio.ac 컬렉션 조회 중: id={raw_id}, pwd={'***' if try_pwd else 'None'}"
+                )
+                c_resp = session.post(
+                    API_COLLECTION_GET,
+                    data=cbor2.dumps(coll_payload),
+                    headers=cbor_headers,
+                    timeout=20,
+                )
+                r_data = None
+                if c_resp.content:
+                    try:
+                        r_data = cbor2.loads(c_resp.content)
+                    except Exception as ex:
+                        logger.warning(f"kio.ac CBOR 응답 역직렬화 실패: {ex}")
+                return c_resp.status_code, r_data
 
-            logger.info(
-                f"kio.ac 컬렉션 조회 중: id={raw_id}, pwd={'***' if pwd else 'None'}"
-            )
-            coll_resp = session.post(
-                API_COLLECTION_GET,
-                data=cbor2.dumps(coll_payload),
-                headers=cbor_headers,
-                timeout=20,
+            # 비밀번호 후보가 있으면 1순위 사용, 없으면 None으로 1회 시도
+            tried_pwds: list[str] = []
+            if pwd_candidates:
+                current_pwd = pwd_candidates[0]
+                tried_pwds.append(current_pwd)
+                status_code, resp_data = _query_collection(current_pwd)
+            else:
+                current_pwd = None
+                status_code, resp_data = _query_collection(None)
+
+            # 암호 필요/불일치 시 추가 후보군 순차 시도
+            err_code = (resp_data or {}).get("code") or ""
+            is_pwd_error = (
+                err_code in ("collection:protector_not_provided", "collection:invalid_protector_config")
+                or "protector" in str(err_code)
             )
 
-            resp_data = None
-            if coll_resp.content:
-                try:
-                    resp_data = cbor2.loads(coll_resp.content)
-                except Exception as e:
-                    logger.warning(f"kio.ac CBOR 응답 역직렬화 실패: {e}")
+            if is_pwd_error:
+                next_candidates = pwd_candidates[1:] if current_pwd else pwd_candidates
+                for next_pwd in next_candidates:
+                    logger.info(f"kio.ac 비밀번호 재시도 중: '{next_pwd}'")
+                    tried_pwds.append(next_pwd)
+                    status_code, resp_data = _query_collection(next_pwd)
+                    if status_code == 200 and isinstance(resp_data, dict) and "token" in resp_data:
+                        current_pwd = next_pwd
+                        logger.info(f"kio.ac 비밀번호 인증 성공: '{current_pwd}'")
+                        break
+                    err_code = (resp_data or {}).get("code") or ""
 
             if (
-                coll_resp.status_code != 200
+                status_code != 200
                 or not isinstance(resp_data, dict)
                 or "token" not in resp_data
             ):
                 err_code = (resp_data or {}).get(
                     "code"
-                ) or f"HTTP {coll_resp.status_code}"
+                ) or f"HTTP {status_code}"
                 err_msg = (resp_data or {}).get("message") or ""
 
-                if err_code == "collection:protector_not_provided":
-                    raise ValueError(
-                        "이 kio.ac 링크는 비밀번호(추출 암호)가 필요합니다. "
-                        "링크 뒤에 ?pwd=비밀번호 또는 | 비밀번호 형태로 함께 입력해 주세요."
-                    )
-                elif err_code == "collection:invalid_protector_config":
-                    raise ValueError(
-                        f"kio.ac 암호가 일치하지 않습니다 (입력값: '{pwd}'). "
-                        "올바른 비밀번호를 확인하고 다시 입력해 주세요."
-                    )
-                elif "not_found" in err_code or coll_resp.status_code == 404:
+                if err_code in ("collection:protector_not_provided", "collection:invalid_protector_config") or "protector" in str(err_code):
+                    if tried_pwds:
+                        tried_str = ", ".join(repr(p) for p in tried_pwds)
+                        raise ValueError(
+                            f"kio.ac 암호가 일치하지 않습니다 (시도한 비밀번호: {tried_str}). "
+                            "올바른 비밀번호를 확인하고 다시 입력해 주세요."
+                        )
+                    else:
+                        raise ValueError(
+                            "이 kio.ac 링크는 비밀번호(추출 암호)가 필요합니다. "
+                            "링크 뒤에 ?pwd=비밀번호 또는 | 비밀번호 형태로 함께 입력해 주세요."
+                        )
+                elif "not_found" in err_code or status_code == 404:
                     raise FileNotFoundError(
                         "kio.ac 컬렉션이 삭제되었거나 존재하지 않는 링크입니다."
                     )

@@ -252,12 +252,28 @@ class TeraBoxResolver(BaseResolver):
 
             # 암호(비밀번호)가 필요한 페이지인지 확인
             is_password_required = (
-                "/sharing/init" in parsed_final.path
-                or "암호를 입력하세요" in resp.text
+                "/init" in parsed_final.path
+                or "init?surl=" in final_url
+                or "init?surl=" in clean_url
                 or "암호를 입력하세요" in resp.text
                 or "암호로 보호되어 있습니다" in resp.text
+                or bool(
+                    re.search(
+                        r'<input[^>]+(?:id|name)=["\'](?:pwd|password)["\']',
+                        resp.text,
+                        re.I,
+                    )
+                )
+                or bool(
+                    re.search(
+                        r'placeholder=["\'](?:추출\s*암호|암호|비밀번호|extraction\s*code|extract\s*code)["\']',
+                        resp.text,
+                        re.I,
+                    )
+                )
             )
 
+            verified = False
             if is_password_required:
                 if not pwd_candidates:
                     raise ValueError(
@@ -266,7 +282,6 @@ class TeraBoxResolver(BaseResolver):
                     )
 
                 verify_url = f"https://{parsed_final.netloc}/share/verify?surl={surl}"
-                verified = False
                 tried = []
                 last_err = None
                 for idx, cand in enumerate(pwd_candidates, 1):
@@ -372,14 +387,16 @@ class TeraBoxResolver(BaseResolver):
 
             if list_data.get("errno") != 0:
                 err_code = list_data.get("errno")
-                if err_code in (-9, -12, 105) and not is_password_required and pwd_candidates:
+                if not verified and pwd_candidates:
                     logger.info(
-                        f"테라박스 추가 암호 인증 시도 중 (surl: {surl}, 후보군: {len(pwd_candidates)}개)"
+                        f"테라박스 추가 암호 인증 시도 중 (surl: {surl}, 후보군: {len(pwd_candidates)}개, 이전 errno: {err_code})"
                     )
                     verify_url = (
                         f"https://{parsed_final.netloc}/share/verify?surl={surl}"
                     )
+                    tried_fallback = []
                     for cand in pwd_candidates:
+                        tried_fallback.append(cand)
                         verify_resp = session.post(
                             verify_url,
                             data={"pwd": cand, "vcode": "", "vcode_str": ""},
@@ -392,6 +409,7 @@ class TeraBoxResolver(BaseResolver):
                         verify_data = verify_resp.json() if verify_resp.ok else {}
                         if verify_data.get("errno") == 0:
                             pwd = cand
+                            verified = True
                             randsk = verify_data.get("randsk")
                             if randsk:
                                 for d in {
@@ -414,12 +432,18 @@ class TeraBoxResolver(BaseResolver):
                             if err_code == 0:
                                 logger.info(f"테라박스 추가 암호 인증 성공! (적용된 암호: '{pwd}')")
                                 break
+                    if not verified and tried_fallback and err_code != 0:
+                        tried_str = ", ".join(repr(p) for p in tried_fallback)
+                        raise ValueError(
+                            f"테라박스 암호가 일치하지 않습니다 (시도한 비밀번호: {tried_str}). 올바른 추출 암호를 확인해 주세요."
+                        )
                 if err_code == -9:
                     raise ValueError(
                         "테라박스 공유 링크가 만료되었거나 암호 인증이 필요합니다. "
                         "링크 뒤에 ?pwd=비밀번호 형태로 암호를 함께 입력해 주세요."
                     )
-                logger.warning(f"테라박스 share/list 응답 오류 (errno: {err_code})")
+                if err_code != 0:
+                    logger.warning(f"테라박스 share/list 응답 오류 (errno: {err_code})")
 
             file_list = list_data.get("list", [])
             if not file_list:

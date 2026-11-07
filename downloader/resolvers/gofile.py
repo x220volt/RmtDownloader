@@ -298,8 +298,14 @@ def _check_password_status(payload: dict) -> tuple[bool, str]:
     if not isinstance(payload, dict):
         return False, ""
     status = str(payload.get("status") or "")
-    if status == "error-passwordRequired":
-        return True, "passwordRequired"
+    if status in (
+        "error-passwordRequired",
+        "error-passwordWrong",
+        "error-wrongPassword",
+        "error-invalidPassword",
+    ) or "password" in status.lower():
+        clean_code = status.replace("error-", "")
+        return True, clean_code or "passwordRequired"
     data = payload.get("data")
     if isinstance(data, dict):
         can_access = data.get("canAccess")
@@ -311,6 +317,8 @@ def _check_password_status(payload: dict) -> tuple[bool, str]:
             return True, pwd_status or "passwordRequired"
         if pwd_status in ("passwordRequired", "passwordWrong"):
             return True, pwd_status
+        if can_access is False and is_password:
+            return True, "passwordRequired"
     return False, ""
 
 
@@ -340,8 +348,9 @@ class GofileResolver(BaseResolver):
         options = options or {}
         configured_token = options.get("gofile_token", "").strip()
 
-        # 1. 수동 지정 비밀번호 (URL 쿼리, 파이프 구분자, 또는 options 매개변수)
-        manual_pwd = (
+        from ..url_helper import parse_password_list
+
+        raw_manual = (
             extracted_pwd
             or str(
                 options.get("password")
@@ -350,6 +359,8 @@ class GofileResolver(BaseResolver):
                 or ""
             ).strip()
         )
+        parsed_manual = parse_password_list(raw_manual)
+        manual_pwd = parsed_manual[0] if parsed_manual else ""
 
         # 2. 비밀번호 후보군 전체 구성 (수동 비밀번호 -> 사전 등록 비밀번호 목록)
         all_candidates = get_candidate_passwords(url, options)
@@ -389,6 +400,13 @@ class GofileResolver(BaseResolver):
                     params=req_params,
                     timeout=20,
                 )
+                if resp.status_code in (400, 401, 403):
+                    try:
+                        err_payload = resp.json()
+                        if isinstance(err_payload, dict) and "status" in err_payload:
+                            return err_payload
+                    except Exception:
+                        pass
                 resp.raise_for_status()
                 return resp.json()
 
@@ -450,8 +468,14 @@ class GofileResolver(BaseResolver):
 
             if payload.get("status") != "ok":
                 status = payload.get("status")
-                if status == "error-passwordRequired":
-                    raise ValueError("GoFile 비밀번호로 보호되어 있는 링크입니다.")
+                if status in (
+                    "error-passwordRequired",
+                    "error-passwordWrong",
+                    "error-wrongPassword",
+                    "error-invalidPassword",
+                ) or "password" in str(status).lower():
+                    tried_str = f" (시도한 비밀번호: {', '.join(repr(p) for p in tried_pwds)})" if tried_pwds else ""
+                    raise ValueError(f"GoFile 비밀번호로 보호되어 있는 링크이며, 입력/기본 비밀번호가 일치하지 않습니다.{tried_str}")
                 if status == "error-notFound":
                     raise FileNotFoundError(
                         "GoFile 콘텐츠를 찾을 수 없습니다(삭제되었거나 잘못된 링크)."

@@ -336,6 +336,170 @@ class TestAutoPasswords(unittest.TestCase):
             self.assertEqual(res["filename"], "GameFile.zip")
             self.assertEqual(fake_session.get.call_count, 2)
 
+    def test_gofile_error_password_wrong_status(self):
+        """GoFile API가 error-passwordWrong 상태 코드를 반환할 때 다음 비밀번호로 정상 재시도하는지 검증."""
+        from downloader.resolvers.gofile import GofileResolver
+
+        resolver = GofileResolver()
+        url = "https://gofile.io/d/TESTFAILID"
+
+        # 1차 시도 (pw1): status == "error-passwordWrong" (실제 GoFile API 응답 포맷)
+        resp1 = Mock(status_code=200, ok=True)
+        resp1.json.return_value = {
+            "status": "error-passwordWrong",
+            "data": None,
+        }
+
+        # 2차 시도 (pw2): status == "ok" 성공
+        resp2 = Mock(status_code=200, ok=True)
+        resp2.json.return_value = {
+            "status": "ok",
+            "data": {
+                "canAccess": True,
+                "children": {
+                    "f1": {
+                        "type": "file",
+                        "name": "SecretGame.iso",
+                        "link": "https://store.gofile.io/dl/SecretGame.iso",
+                    }
+                },
+            },
+        }
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        fake_session.get.side_effect = [resp1, resp2]
+
+        with (
+            patch(
+                "downloader.resolvers.gofile.requests.Session",
+                return_value=fake_session,
+            ),
+            patch(
+                "downloader.resolvers.gofile.get_guest_token", return_value="guest_tok"
+            ),
+            patch(
+                "downloader.resolvers.gofile.get_gofile_secret", return_value="sec_123"
+            ),
+        ):
+            res = resolver.resolve(url, options={"auto_passwords": "pw1, pw2"})
+            self.assertEqual(res["filename"], "SecretGame.iso")
+            self.assertEqual(fake_session.get.call_count, 2)
+
+    def test_kio_multiple_candidate_passwords(self):
+        """kio.ac 암호 보호 컬렉션에서 1차 암호 실패 후 2차 암호로 자동 통과되는지 검증."""
+        from downloader.resolvers.kio import KioResolver
+
+        resolver = KioResolver()
+        url = "https://kio.ac/c/0123456789012345678901"
+
+        page_resp = Mock(status_code=200, ok=True, text='var a=1;')
+        # 1차 시도: 암호 불일치
+        cbor_fail = Mock(status_code=403, content=b"dummy")
+        # 2차 시도: 암호 일치
+        cbor_ok = Mock(status_code=200, content=b"dummy")
+        # 디렉터리 목록 조회
+        dir_ok = Mock(status_code=200, content=b"dummy")
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        fake_session.get.side_effect = [page_resp]
+        fake_session.post.side_effect = [cbor_fail, cbor_ok, dir_ok]
+
+        with (
+            patch("downloader.resolvers.kio.requests.Session", return_value=fake_session),
+            patch("cbor2.loads") as mock_cbor,
+            patch("downloader.resolvers.kio.decode_kio_id", return_value=b"\x00" * 16),
+        ):
+            mock_cbor.side_effect = [
+                {"code": "collection:invalid_protector_config", "message": "wrong pwd"},
+                {"token": "auth_token_xyz", "root": b"\x01" * 16, "name": "ProtectedCollection"},
+                {
+                    "files": [
+                        {
+                            "id": b"\x02" * 16,
+                            "name": "GameData.bin",
+                            "size": 1024,
+                            "token": "file_token_123",
+                        }
+                    ],
+                    "directories": [],
+                },
+            ]
+            res = resolver.resolve(url, options={"auto_passwords": "wrong_pw, correct_pw"})
+            self.assertEqual(res["filename"], "GameData.bin")
+            self.assertEqual(fake_session.post.call_count, 3)
+
+    def test_terabox_fallback_list_errno_multiple_passwords(self):
+        """테라박스 초기 페이지에서 암호 폼이 감지되지 않아도 /share/list 응답 오류 시 자동 재시도 검증."""
+        from downloader.resolvers.terabox import TeraBoxResolver
+
+        resolver = TeraBoxResolver()
+        fake_session = Mock()
+        fake_session.__enter__ = Mock(return_value=fake_session)
+        fake_session.__exit__ = Mock(return_value=False)
+        fake_session.headers = {}
+        fake_session.cookies = Mock()
+        fake_session.cookies.get_dict.return_value = {}
+
+        # 1. 초기 페이지 요청: 일반 공유 페이지처럼 보임 (is_password_required=False)
+        page_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://www.1024tera.com/sharing/link?surl=testfallback123",
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            text='<html><body><div>File download page</div>fn%28%22TOKEN123%22%29</body></html>',
+        )
+        # 2. 1차 share/list 요청: errno -9 (암호 필요)
+        list_resp_fail = Mock(status_code=200, ok=True)
+        list_resp_fail.json.return_value = {"errno": -9}
+
+        # 3. 1차 암호 verify(cand1) 실패
+        verify_fail = Mock(status_code=200, ok=True)
+        verify_fail.json.return_value = {"errno": 400135}
+
+        # 4. 2차 암호 verify(cand2) 성공
+        verify_ok = Mock(status_code=200, ok=True)
+        verify_ok.json.return_value = {"errno": 0, "randsk": "randsk_test"}
+
+        # 5. 2차 share/list 요청: errno 0 성공
+        list_resp_ok = Mock(status_code=200, ok=True)
+        list_resp_ok.json.return_value = {
+            "errno": 0,
+            "share_id": 999,
+            "uk": 888,
+            "list": [
+                {
+                    "fs_id": "555",
+                    "isdir": "0",
+                    "server_filename": "FallbackPass.zip",
+                    "size": "1000",
+                    "dlink": "https://d.terabox.app/file/fallback.zip",
+                }
+            ],
+        }
+
+        fake_session.get.side_effect = [page_resp, list_resp_fail, list_resp_ok]
+        fake_session.post.side_effect = [verify_fail, verify_ok]
+
+        with (
+            patch(
+                "downloader.resolvers.terabox.requests.Session",
+                return_value=fake_session,
+            ),
+            patch("config.load_settings", return_value={"terabox_cookie": ""}),
+        ):
+            res = resolver.resolve(
+                "https://1024terabox.com/s/1testfallback123",
+                options={
+                    "candidate_passwords": "wrong_pw, right_pw",
+                    "terabox_mode": "download",
+                    "terabox_cookie": "",
+                },
+            )
+            self.assertEqual(res["filename"], "FallbackPass.zip")
+            self.assertEqual(fake_session.post.call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
