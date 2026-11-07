@@ -170,6 +170,7 @@ def validate_json_body():
             "referer",
             "password",
             "pwd",
+            "auto_passwords",
             "terabox_password",
             "terabox_mode",
             "mode",
@@ -395,6 +396,9 @@ def get_info():
             "storage": storage,
             "terabox_mode": settings.get("terabox_mode", "download"),
             "terabox_password": settings.get("terabox_password", ""),
+            "auto_passwords": settings.get(
+                "auto_passwords", settings.get("terabox_password", "")
+            ),
             "auth_enabled": settings.get("auth_enabled", True),
             "capture_source_page": settings.get("capture_source_page", False),
             "api_token": api_token,
@@ -432,7 +436,9 @@ def add_jobs():
     single_password = str(
         data.get("password")
         or data.get("pwd")
+        or data.get("auto_passwords")
         or data.get("terabox_password")
+        or settings.get("auto_passwords")
         or settings.get("terabox_password", "")
         or ""
     ).strip()
@@ -1218,6 +1224,17 @@ def update_app():
 
     is_frozen = getattr(sys, "frozen", False)
 
+    # 도커(Docker/NAS) 환경 감지 시 컨테이너 전용 업데이트 안내
+    if os.path.exists("/.dockerenv") or os.environ.get("IS_DOCKER"):
+        return jsonify(
+            {
+                "status": "info",
+                "is_frozen": False,
+                "mode": "docker",
+                "message": "도커(Docker/NAS) 컨테이너 환경에서 실행 중입니다. 최신 버전 업데이트는 'docker compose pull && docker compose up -d' 명령어를 통해 진행해 주세요.",
+            }
+        )
+
     # 1. 소스 코드 실행 환경 (git pull 지원)
     if not is_frozen:
         git_dir = Path(__file__).resolve().parent / ".git"
@@ -1456,6 +1473,9 @@ def get_settings():
             "gofile_token": s.get("gofile_token", ""),
             "terabox_cookie": s.get("terabox_cookie", ""),
             "terabox_password": s.get("terabox_password", ""),
+            "auto_passwords": s.get(
+                "auto_passwords", s.get("terabox_password", "")
+            ),
             "terabox_mode": s.get("terabox_mode", "download"),
             "terabox_save_path": s.get("terabox_save_path", "/"),
             "auth_enabled": s.get("auth_enabled", True),
@@ -1541,7 +1561,17 @@ def update_settings():
         data.pop("auth_password", None)
     data.pop("auth_password_confirm", None)
 
-    # 3. 브라우저 세션 유지 기간 설정 검증 및 Flask 앱 반영
+    # 3. 사전 등록 비밀번호 목록 동기화 (auto_passwords / terabox_password)
+    if "auto_passwords" in data:
+        data["auto_passwords"] = str(data.get("auto_passwords") or "").strip()
+        if not data.get("terabox_password"):
+            data["terabox_password"] = data["auto_passwords"]
+    elif "terabox_password" in data:
+        data["terabox_password"] = str(data.get("terabox_password") or "").strip()
+        if not data.get("auto_passwords"):
+            data["auto_passwords"] = data["terabox_password"]
+
+    # 4. 브라우저 세션 유지 기간 설정 검증 및 Flask 앱 반영
     if "session_lifetime_days" in data:
         try:
             days = int(data["session_lifetime_days"])
@@ -1570,6 +1600,9 @@ def update_settings():
                 "auth_username": updated.get("auth_username"),
                 "terabox_cookie": updated.get("terabox_cookie"),
                 "terabox_password": updated.get("terabox_password"),
+                "auto_passwords": updated.get(
+                    "auto_passwords", updated.get("terabox_password", "")
+                ),
                 "terabox_mode": updated.get("terabox_mode"),
                 "terabox_save_path": updated.get("terabox_save_path"),
                 "auto_subfolder": updated.get("auto_subfolder"),
@@ -1662,6 +1695,14 @@ def open_download_folder():
         return jsonify(
             {"success": False, "error": "다운로드 경로가 설정되지 않았습니다."}
         ), 400
+    if os.path.exists("/.dockerenv") or os.environ.get("IS_DOCKER"):
+        return jsonify(
+            {
+                "success": True,
+                "path": d_dir,
+                "message": f"NAS/도커 환경에서는 서버 호스트의 파일 탐색기를 직접 열 수 없습니다. (다운로드 저장 경로: {d_dir})",
+            }
+        )
     try:
         os.makedirs(d_dir, exist_ok=True)
         if os.name == "nt":
@@ -1764,7 +1805,8 @@ def ensure_single_instance():
     else:
         import fcntl
 
-        lock_path = Path.home() / ".remote_downloader.lock"
+        lock_dir = CONFIG_DIR if CONFIG_DIR.exists() else Path.home()
+        lock_path = lock_dir / ".remote_downloader.lock"
         try:
             f = open(lock_path, "w")
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)

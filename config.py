@@ -14,18 +14,28 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.47"
+APP_VERSION = "0.1.48"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
+_env_config = os.environ.get("CONFIG_DIR")
 CONFIG_DIR = (
-    Path(sys.executable).parent
-    if getattr(sys, "frozen", False)
-    else Path(__file__).parent
+    Path(_env_config).resolve()
+    if _env_config
+    else (
+        Path(sys.executable).parent
+        if getattr(sys, "frozen", False)
+        else Path(__file__).parent
+    )
 )
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 TORRENTS_DIR = CONFIG_DIR / "data" / "torrents"
 
-DEFAULT_DOWNLOAD_DIR = str(Path.home() / "Downloads" / "RemoteDownloads")
+_env_download = os.environ.get("DOWNLOAD_DIR")
+DEFAULT_DOWNLOAD_DIR = (
+    _env_download
+    if _env_download
+    else str(Path.home() / "Downloads" / "RemoteDownloads")
+)
 
 DEFAULT_SETTINGS = {
     "host": "0.0.0.0",
@@ -43,6 +53,7 @@ DEFAULT_SETTINGS = {
     "subfolder_rule": "package_or_title",
     "terabox_cookie": "",
     "terabox_password": "",
+    "auto_passwords": "",
     "terabox_mode": "download",
     "terabox_save_path": "/",
     "flaresolverr_url": "",
@@ -165,6 +176,19 @@ def load_settings():
                 "Invalid settings file; using defaults", exc_info=True
             )
             settings = dict(DEFAULT_SETTINGS)
+
+        # Linux/Docker 환경에서 Windows 경로(예: C:\...)가 저장되어 있는 경우 자동 보정
+        if os.name != "nt":
+            cur_dl = str(settings.get("download_dir", ""))
+            if re.match(r"^[a-zA-Z]:[\\/]", cur_dl):
+                fallback_dl = os.environ.get("DOWNLOAD_DIR") or DEFAULT_DOWNLOAD_DIR
+                logging.getLogger(__name__).info(
+                    "Linux/Docker 환경에서 Windows 다운로드 경로 감지(%s) -> %s(으)로 자동 보정",
+                    cur_dl,
+                    fallback_dl,
+                )
+                settings["download_dir"] = fallback_dl
+
         configure_ssl_verification(bool(settings.get("ignore_ssl_certs", False)))
         return settings
 
@@ -199,7 +223,10 @@ def save_settings(new_settings):
         settings = load_settings()
         settings.update(new_settings)
         validate_settings(settings)
-        os.makedirs(str(settings["download_dir"]), exist_ok=True)
+        try:
+            os.makedirs(str(settings["download_dir"]), exist_ok=True)
+        except OSError as e:
+            logging.getLogger(__name__).warning("다운로드 디렉터리 생성 실패: %s", e)
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(

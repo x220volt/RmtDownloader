@@ -347,7 +347,10 @@ class TransferitResolver(BaseResolver):
                 "filename": opts.get("filename", ""),
                 "source_service": "Transfer.it",
             }
-        password = (
+        from ..url_helper import get_candidate_passwords
+
+        candidates = get_candidate_passwords(url, opts)
+        manual_pwd = (
             opts.get("password") or opts.get("pwd") or opts.get("code") or ""
         ).strip() or None
 
@@ -358,15 +361,47 @@ class TransferitResolver(BaseResolver):
             raise ValueError(f"유효하지 않은 Transfer.it 링크입니다: {e}")
 
         logger.info(f"Transfer.it 전송 정보 조회 중 (xh: {xh})...")
-        try:
-            node_dicts, pw_token = api.fetch_transfer(xh, password=password)
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "password" in err_msg or "credential" in err_msg or "decrypt" in err_msg:
+
+        # 시도할 비밀번호 목록 구성: 수동 암호가 있으면 1순위, 없으면 None(암호 없음) 먼저 시도 후 사전등록 후보군 순차 시도
+        try_pwds: list[str | None] = []
+        if manual_pwd:
+            try_pwds.append(manual_pwd)
+        else:
+            try_pwds.append(None)
+        for cand in candidates:
+            if cand != manual_pwd and cand not in try_pwds:
+                try_pwds.append(cand)
+
+        node_dicts = None
+        pw_token = None
+        password = None
+        last_err = None
+        tried_pwds = []
+
+        for cand in try_pwds:
+            if cand is not None:
+                tried_pwds.append(cand)
+            try:
+                node_dicts, pw_token = api.fetch_transfer(xh, password=cand)
+                password = cand
+                if cand:
+                    logger.info(f"Transfer.it 비밀번호 인증 성공: '{cand}'")
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                last_err = e
+                if "password" in err_msg or "credential" in err_msg or "decrypt" in err_msg:
+                    continue
+                else:
+                    raise ValueError(f"Transfer.it 링크 정보를 가져올 수 없습니다: {e}")
+
+        if node_dicts is None:
+            if tried_pwds:
+                tried_str = ", ".join(repr(p) for p in tried_pwds)
                 raise ValueError(
-                    "이 Transfer.it 링크는 비밀번호가 필요하거나 입력한 암호가 일치하지 않습니다."
+                    f"이 Transfer.it 링크는 비밀번호가 필요하거나 시도한 암호({tried_str})가 일치하지 않습니다."
                 )
-            raise ValueError(f"Transfer.it 링크 정보를 가져올 수 없습니다: {e}")
+            raise ValueError(f"이 Transfer.it 링크는 비밀번호가 필요합니다: {last_err}")
 
         nodes = [TransferNode.from_dict(n) for n in node_dicts]
         files = [n for n in nodes if n.is_file]

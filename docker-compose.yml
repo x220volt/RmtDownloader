@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  remote-downloader:
+    container_name: remote-downloader
+    image: remote-downloader:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "7971:7971"
+    environment:
+      # [필수 확인] 시놀로지/리눅스 호스트 계정의 UID 및 GID
+      # SSH에서 `id` 명령어를 입력하여 확인 가능 (시놀로지 기본 사용자: 보통 1026 / 100, 일반 리눅스: 1000 / 1000)
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Seoul
+      - UMASK=022
+      - CONFIG_DIR=/config
+      - DOWNLOAD_DIR=/downloads
+    volumes:
+      # [설정 볼륨] 설정(settings.json), 작업 큐(jobs.json), 히스토리 영구 보관 폴더
+      # 시놀로지 Container Manager 예시: /volume1/docker/remote_downloader/config:/config
+      - ./config:/config
+      # [다운로드 볼륨] 다운로드 완료 파일이 저장될 실제 NAS 공유 폴더
+      # 시놀로지 Container Manager 예시: /volume1/downloads:/downloads
+      - ./downloads:/downloads
+    # Cloudflare 우회 및 웹페이지 캡처용 브라우저 메모리 확보 (512MB 권장)
+    shm_size: "512mb"
+

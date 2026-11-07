@@ -149,7 +149,13 @@ class TeraBoxResolver(BaseResolver):
         return True
 
     def resolve(self, url: str, options: dict | None = None) -> dict:
+        from ..url_helper import get_candidate_passwords
+
         clean_url, pwd = _extract_pwd(url, options)
+        pwd_candidates = get_candidate_passwords(url, options)
+        if pwd and pwd not in pwd_candidates:
+            pwd_candidates.insert(0, pwd)
+
         if not _is_terabox_host(urlparse(clean_url).hostname):
             raise ValueError("Untrusted TeraBox URL")
         with requests.Session() as session:
@@ -253,36 +259,56 @@ class TeraBoxResolver(BaseResolver):
             )
 
             if is_password_required:
-                if not pwd:
+                if not pwd_candidates:
                     raise ValueError(
                         "이 테라박스 링크는 비밀번호(추출 암호)가 필요합니다. "
-                        "링크 뒤에 ?pwd=비밀번호 또는 | 비밀번호 형태로 함께 입력해 주세요."
+                        "웹 대시보드 ⚙️ 설정에서 공통 비밀번호를 등록하거나, 링크 뒤에 ?pwd=비밀번호 또는 | 비밀번호 형태로 함께 입력해 주세요."
                     )
 
-                logger.info(f"테라박스 암호 확인 시도 중 (surl: {surl}, pwd: {pwd})")
                 verify_url = f"https://{parsed_final.netloc}/share/verify?surl={surl}"
-                verify_resp = session.post(
-                    verify_url,
-                    data={"pwd": pwd, "vcode": "", "vcode_str": ""},
-                    headers={
-                        "Referer": final_url,
-                        "Accept": "application/json, text/plain, */*",
-                    },
-                    timeout=20,
-                )
-                verify_data = verify_resp.json() if verify_resp.ok else {}
-                if verify_data.get("errno") != 0:
-                    err_code = verify_data.get("errno")
-                    if err_code == 400136:
+                verified = False
+                tried = []
+                last_err = None
+                for idx, cand in enumerate(pwd_candidates, 1):
+                    tried.append(cand)
+                    logger.info(
+                        f"테라박스 암호 확인 시도 ({idx}/{len(pwd_candidates)}): '{cand}' (surl: {surl})"
+                    )
+                    verify_resp = session.post(
+                        verify_url,
+                        data={"pwd": cand, "vcode": "", "vcode_str": ""},
+                        headers={
+                            "Referer": final_url,
+                            "Accept": "application/json, text/plain, */*",
+                        },
+                        timeout=20,
+                    )
+                    verify_data = verify_resp.json() if verify_resp.ok else {}
+                    if verify_data.get("errno") == 0:
+                        pwd = cand
+                        verified = True
+                        logger.info(f"테라박스 암호 인증 성공! (적용된 암호: '{pwd}')")
+                        break
+                    else:
+                        err_code = verify_data.get("errno")
+                        last_err = err_code
+                        logger.warning(
+                            f"테라박스 암호 '{cand}' 인증 실패 (errno: {err_code})"
+                        )
+                        if err_code == 400136 and len(pwd_candidates) == 1:
+                            break
+
+                if not verified:
+                    tried_str = ", ".join(repr(p) for p in tried)
+                    if last_err == 400136:
                         raise ValueError(
-                            f"테라박스 암호 확인 실패: 보안 인증(캡차)이 발생했거나 암호가 일치하지 않습니다 (입력값: '{pwd}'). "
+                            f"테라박스 암호 확인 실패: 보안 인증(캡차)이 발생했거나 암호가 일치하지 않습니다 (입력값: {tried_str}). "
                             "공유자가 제공한 올바른 4자리 추출 암호를 확인해 주세요."
                         )
                     raise ValueError(
-                        f"테라박스 암호가 일치하지 않습니다 (입력값: '{pwd}'). "
+                        f"테라박스 암호가 일치하지 않습니다 (입력값: {tried_str}). "
                         "공유자가 제공한 올바른 추출 암호를 확인하고 다시 입력해 주세요."
                     )
-                logger.info(f"테라박스 암호 인증 성공! (적용된 암호: '{pwd}')")
 
                 randsk = verify_data.get("randsk")
                 if randsk:
@@ -346,43 +372,48 @@ class TeraBoxResolver(BaseResolver):
 
             if list_data.get("errno") != 0:
                 err_code = list_data.get("errno")
-                if err_code in (-9, -12, 105) and not is_password_required and pwd:
+                if err_code in (-9, -12, 105) and not is_password_required and pwd_candidates:
                     logger.info(
-                        f"테라박스 추가 암호 인증 시도 중 (surl: {surl}, pwd: {pwd})"
+                        f"테라박스 추가 암호 인증 시도 중 (surl: {surl}, 후보군: {len(pwd_candidates)}개)"
                     )
                     verify_url = (
                         f"https://{parsed_final.netloc}/share/verify?surl={surl}"
                     )
-                    verify_resp = session.post(
-                        verify_url,
-                        data={"pwd": pwd, "vcode": "", "vcode_str": ""},
-                        headers={
-                            "Referer": final_url,
-                            "Accept": "application/json, text/plain, */*",
-                        },
-                        timeout=20,
-                    )
-                    verify_data = verify_resp.json() if verify_resp.ok else {}
-                    if verify_data.get("errno") == 0:
-                        randsk = verify_data.get("randsk")
-                        if randsk:
-                            for d in {
-                                final_root,
-                                ".terabox.com",
-                                ".terabox.app",
-                                ".1024tera.com",
-                            }:
-                                if d:
-                                    try:
-                                        session.cookies.set("BOXCLND", randsk, domain=d)
-                                        session.cookies.set("BDCLND", randsk, domain=d)
-                                    except Exception:
-                                        pass
-                        list_resp = session.get(
-                            api_url, params=params, headers=headers, timeout=25
+                    for cand in pwd_candidates:
+                        verify_resp = session.post(
+                            verify_url,
+                            data={"pwd": cand, "vcode": "", "vcode_str": ""},
+                            headers={
+                                "Referer": final_url,
+                                "Accept": "application/json, text/plain, */*",
+                            },
+                            timeout=20,
                         )
-                        list_data = list_resp.json() if list_resp.ok else {}
-                        err_code = list_data.get("errno")
+                        verify_data = verify_resp.json() if verify_resp.ok else {}
+                        if verify_data.get("errno") == 0:
+                            pwd = cand
+                            randsk = verify_data.get("randsk")
+                            if randsk:
+                                for d in {
+                                    final_root,
+                                    ".terabox.com",
+                                    ".terabox.app",
+                                    ".1024tera.com",
+                                }:
+                                    if d:
+                                        try:
+                                            session.cookies.set("BOXCLND", randsk, domain=d)
+                                            session.cookies.set("BDCLND", randsk, domain=d)
+                                        except Exception:
+                                            pass
+                            list_resp = session.get(
+                                api_url, params=params, headers=headers, timeout=25
+                            )
+                            list_data = list_resp.json() if list_resp.ok else {}
+                            err_code = list_data.get("errno")
+                            if err_code == 0:
+                                logger.info(f"테라박스 추가 암호 인증 성공! (적용된 암호: '{pwd}')")
+                                break
                 if err_code == -9:
                     raise ValueError(
                         "테라박스 공유 링크가 만료되었거나 암호 인증이 필요합니다. "

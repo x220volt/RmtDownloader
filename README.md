@@ -1,4 +1,4 @@
-# 🚀 원격 다운로더 (Remote Downloader) `v0.1.47`
+# 🚀 원격 다운로더 (Remote Downloader) `v0.1.48`
 
 스마트폰(iPhone / Android)이나 다른 PC의 웹 브라우저에서 링크·마그넷·Base64 코드를 전송하면, 서버 PC에서 해당 파일을 자동으로 해석·다운로드해 주는 파이썬 기반 원격 다운로드 센터입니다.
 
@@ -54,6 +54,55 @@ pip install -r requirements.txt
 - 기본 접속 포트: `7971` (`http://localhost:7971`)
 - 초기 로그인 계정: 아이디 `admin` / 비밀번호 `password1234`
   *(로그인 후 우측 상단 **⚙️ 시스템 환경설정 ➔ 🔒 보안 & 연동** 탭에서 아이디와 비밀번호를 자유롭게 변경할 수 있으며, 비밀번호는 `scrypt` 단방향 해시로 암호화 저장됩니다.)*
+
+### 3. 🐳 도커(Docker) 및 시놀로지 NAS(Synology Container Manager) 설치
+시놀로지 NAS, QNAP, Unraid 또는 일반 Linux 서버에서 Docker Compose를 사용해 간편하게 실행할 수 있습니다.
+
+#### A. `docker-compose.yml` 파일 작성
+```yaml
+version: '3.8'
+
+services:
+  remote-downloader:
+    container_name: remote-downloader
+    build: .
+    image: remote-downloader:latest
+    restart: unless-stopped
+    ports:
+      - "7971:7971"
+    environment:
+      # 시놀로지/Linux 호스트 계정의 UID / GID (SSH에서 `id` 입력 시 확인 가능)
+      # 시놀로지 일반 사용자: 보통 1026 / 100, 리눅스: 보통 1000 / 1000
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Seoul
+      - UMASK=022
+      - CONFIG_DIR=/config
+      - DOWNLOAD_DIR=/downloads
+    volumes:
+      # 설정 및 큐/히스토리 저장 경로 (시놀로지 예: /volume1/docker/remote_downloader/config:/config)
+      - ./config:/config
+      # 다운로드 파일 저장 실제 경로 (시놀로지 예: /volume1/downloads:/downloads)
+      - ./downloads:/downloads
+    # Cloudflare 우회 및 웹 캡처 브라우저 메모리 확보 (512MB 권장)
+    shm_size: "512mb"
+```
+
+#### B. 실행 명령어
+```bash
+# 컨테이너 빌드 및 백그라운드 실행
+docker compose up -d --build
+
+# 실행 로그 확인
+docker compose logs -f
+```
+
+#### C. 시놀로지 NAS (Container Manager) 설정 팁
+1. **Container Manager** 실행 ➔ **[프로젝트]** ➔ **[생성]** 클릭
+2. 프로젝트 이름(예: `remote-downloader`) 및 경로(예: `/docker/remote_downloader`) 지정
+3. 소스 코드 및 `docker-compose.yml`, `Dockerfile`을 해당 경로에 복사하거나 웹 에디터에 붙여넣기
+4. 볼륨 매핑에서 `/downloads`를 실제 파일이 저장될 NAS 공유 폴더(예: `/volume1/downloads`)로 연결
+5. 환경변수 `PUID`와 `PGID`를 본인의 시놀로지 사용자 계정 ID(기본 `1026:100`)로 설정하면 다운로드된 파일을 NAS 파일 스테이션이나 SMB 네트워크 드라이브에서 권한 문제 없이 자유롭게 읽기/수정/삭제할 수 있습니다.
 
 ---
 

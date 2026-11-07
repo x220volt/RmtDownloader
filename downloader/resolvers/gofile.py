@@ -4,6 +4,8 @@ import hashlib
 import json
 import logging
 import re
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -80,37 +82,63 @@ def _find_wt_script_urls(html: str):
 
 
 def _evaluate_hash_input(script: str) -> str:
-    _ensure_qcore_app()
-    from PyQt6.QtQml import QJSEngine
+    try:
+        _ensure_qcore_app()
+        from PyQt6.QtQml import QJSEngine
 
-    engine = QJSEngine()
-    bootstrap = (
-        "var navigator = {userAgent: "
-        + json.dumps(GOFILE_USER_AGENT)
-        + ", language: "
-        + json.dumps(GOFILE_LANGUAGE)
-        + "}; var window = this; window.navigator = navigator; "
-        "window.location = {hostname: 'gofile.io', search: ''};"
-    )
-    val = engine.evaluate(bootstrap, "bootstrap.js")
-    if val.isError():
-        raise RuntimeError(f"GoFile JS 부트스트랩 실패: {val.toString()}")
+        engine = QJSEngine()
+        bootstrap = (
+            "var navigator = {userAgent: "
+            + json.dumps(GOFILE_USER_AGENT)
+            + ", language: "
+            + json.dumps(GOFILE_LANGUAGE)
+            + "}; var window = this; window.navigator = navigator; "
+            "window.location = {hostname: 'gofile.io', search: ''};"
+        )
+        val = engine.evaluate(bootstrap, "bootstrap.js")
+        if val.isError():
+            raise RuntimeError(f"GoFile JS 부트스트랩 실패: {val.toString()}")
 
-    val = engine.evaluate(script, "wt.obf.js")
-    if val.isError():
-        raise RuntimeError(f"GoFile WT 스크립트 실행 실패: {val.toString()}")
+        val = engine.evaluate(script, "wt.obf.js")
+        if val.isError():
+            raise RuntimeError(f"GoFile WT 스크립트 실행 실패: {val.toString()}")
 
-    probe = (
-        "var __gofileHashInput = ''; "
-        "_sha256 = function(value) { "
-        "__gofileHashInput = String(value); return '0'.repeat(64); }; "
-        f"generateWT({json.dumps(WT_PROBE_TOKEN)}); __gofileHashInput;"
-    )
-    val = engine.evaluate(probe, "probe.js")
-    if val.isError():
-        raise RuntimeError(f"GoFile probe 실행 실패: {val.toString()}")
+        probe = (
+            "var __gofileHashInput = ''; "
+            "_sha256 = function(value) { "
+            "__gofileHashInput = String(value); return '0'.repeat(64); }; "
+            f"generateWT({json.dumps(WT_PROBE_TOKEN)}); __gofileHashInput;"
+        )
+        val = engine.evaluate(probe, "probe.js")
+        if val.isError():
+            raise RuntimeError(f"GoFile probe 실행 실패: {val.toString()}")
 
-    return val.toString()
+        return val.toString()
+    except Exception as qjs_err:
+        node_exe = shutil.which("node") or shutil.which("nodejs")
+        if node_exe:
+            try:
+                js_code = (
+                    f"var navigator = {{userAgent: {json.dumps(GOFILE_USER_AGENT)}, language: {json.dumps(GOFILE_LANGUAGE)}}};\n"
+                    f"var window = globalThis; window.navigator = navigator;\n"
+                    f"window.location = {{hostname: 'gofile.io', search: ''}};\n"
+                    f"{script}\n"
+                    f"var __gofileHashInput = '';\n"
+                    f"_sha256 = function(v) {{ __gofileHashInput = String(v); return '0'.repeat(64); }};\n"
+                    f"generateWT({json.dumps(WT_PROBE_TOKEN)});\n"
+                    f"process.stdout.write(__gofileHashInput);\n"
+                )
+                proc = subprocess.run(
+                    [node_exe, "-e", js_code],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    return proc.stdout.strip()
+            except Exception as node_err:
+                logger.warning(f"Node.js 대체 평가 실패: {node_err}")
+        raise qjs_err
 
 
 def _extract_secret_from_script(script: str) -> str:
@@ -268,7 +296,7 @@ class GofileResolver(BaseResolver):
         )
 
     def resolve(self, url: str, options: dict | None = None) -> dict:
-        from ..url_helper import extract_service_password
+        from ..url_helper import extract_service_password, get_candidate_passwords
 
         clean_u, extracted_pwd = extract_service_password(url, options)
         content_id = parse_gofile_content_id(clean_u) or parse_gofile_content_id(url)
@@ -289,26 +317,16 @@ class GofileResolver(BaseResolver):
             ).strip()
         )
 
-        # 2. 기본 비밀번호 (TeraBox 기본 비밀번호 등)
-        default_pwd = ""
-        if "terabox_password" in options:
-            default_pwd = str(options.get("terabox_password") or "").strip()
-        else:
-            try:
-                import config
-
-                default_pwd = str(
-                    config.load_settings().get("terabox_password") or ""
-                ).strip()
-            except Exception:
-                pass
-
-        # 시도할 비밀번호 후보군 구성
+        # 2. 비밀번호 후보군 전체 구성 (수동 비밀번호 -> 사전 등록 비밀번호 목록)
+        all_candidates = get_candidate_passwords(url, options)
         pwd_candidates: list[tuple[str, str]] = []
-        if manual_pwd:
-            pwd_candidates.append(("수동 입력 비밀번호", manual_pwd))
-        if default_pwd and default_pwd != manual_pwd:
-            pwd_candidates.append(("기본 비밀번호(TeraBox)", default_pwd))
+        for idx, cand in enumerate(all_candidates):
+            label = (
+                "수동 입력 비밀번호"
+                if (manual_pwd and cand == manual_pwd)
+                else f"사전 등록 비밀번호 ({idx + 1})"
+            )
+            pwd_candidates.append((label, cand))
 
         with requests.Session() as session:
             token = configured_token or get_guest_token(session)

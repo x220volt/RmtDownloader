@@ -407,6 +407,128 @@ def extract_clean_url_and_password(text: str) -> tuple[str, str]:
     return "", ""
 
 
+def parse_password_list(pwds_input: Any) -> list[str]:
+    """문자열(쉼표, 세미콜론, 줄바꿈 또는 공백 구분) 또는 시퀀스로부터 비밀번호 후보 목록을 순서대로 추출합니다."""
+    if not pwds_input:
+        return []
+    if isinstance(pwds_input, (list, tuple, set)):
+        raw_list = [str(x).strip() for x in pwds_input if str(x).strip()]
+    else:
+        text = str(pwds_input).strip()
+        if not text:
+            return []
+        # 쉼표, 세미콜론, 줄바꿈이 있는 경우 해당 구분자로 먼저 분리
+        if re.search(r"[,;\n\r\t]", text):
+            raw_list = [p.strip() for p in re.split(r"[,;\n\r\t]+", text) if p.strip()]
+        else:
+            # 구분자가 없다면 공백으로 분리
+            raw_list = [p.strip() for p in text.split() if p.strip()]
+
+    seen = set()
+    result = []
+    for p in raw_list:
+        if p and p not in seen:
+            seen.add(p)
+            result.append(p)
+    return result
+
+
+def get_candidate_passwords(
+    url: str = "",
+    options: dict | None = None,
+    max_short_len: int = 16,
+) -> list[str]:
+    """
+    URL(주변 텍스트, 쿼리, 해시, 파이프), options 및 서버 설정에 등록된 비밀번호 후보군 전체를
+    우선순위 순서대로 중복 없이 반환합니다.
+
+    우선순위:
+    1. URL에서 명시적으로 파싱된 단일/복수 비밀번호 (?pwd=, #pwd=, | pwd:, PASSWORD_REGEX 등)
+    2. options에 직접 전달된 수동 암호 또는 목록 ('password', 'pwd', 'code', 'auto_passwords', 'candidate_passwords')
+    3. 서버 전역 설정에 사전 등록된 공통 비밀번호 ('auto_passwords', 'terabox_password')
+    """
+    candidates: list[str] = []
+
+    # 1. URL 자체(텍스트, 파이프, 쿼리, 해시 프래그먼트)에서 추출된 비밀번호
+    if url:
+        pure_u, found_pwd = extract_clean_url_and_password(url)
+        url_pwd = found_pwd
+        if not url_pwd:
+            m = PASSWORD_REGEX.search(url)
+            if m:
+                url_pwd = m.group(1).strip()
+        if " | " in url:
+            _, name_or_pwd = url.split(" | ", 1)
+            name_or_pwd = name_or_pwd.strip()
+            if name_or_pwd.lower().startswith("pwd:"):
+                url_pwd = name_or_pwd[4:].strip()
+            elif name_or_pwd.lower().startswith("pw:"):
+                url_pwd = name_or_pwd[3:].strip()
+            elif not url_pwd and len(name_or_pwd) <= max_short_len and not ("." in name_or_pwd):
+                url_pwd = name_or_pwd
+        target_u = pure_u if pure_u else url.strip()
+        if " | " in target_u:
+            target_u = target_u.split(" | ", 1)[0].strip()
+        parsed = urlparse(target_u)
+        if parsed.query and not url_pwd:
+            qs = parse_qs(parsed.query)
+            for k in ("pwd", "password", "p", "pass", "code", "key"):
+                if k in qs and qs[k]:
+                    url_pwd = qs[k][0].strip()
+                    break
+        if parsed.fragment and not url_pwd:
+            frag = parsed.fragment.strip()
+            if "=" in frag:
+                f_qs = parse_qs(frag)
+                for k in ("pwd", "password", "p", "code"):
+                    if k in f_qs and f_qs[k]:
+                        url_pwd = f_qs[k][0].strip()
+                        break
+            elif len(frag) <= max_short_len and not ("/" in frag):
+                url_pwd = frag
+
+        if url_pwd:
+            candidates.extend(parse_password_list(url_pwd))
+
+    # 2. options 파라미터에 전달된 비밀번호
+    if options and isinstance(options, dict):
+        for key in (
+            "candidate_passwords",
+            "auto_passwords",
+            "passwords",
+            "password",
+            "pwd",
+            "code",
+        ):
+            if key in options and options[key]:
+                candidates.extend(parse_password_list(options[key]))
+        if "terabox_password" in options and options["terabox_password"]:
+            candidates.extend(parse_password_list(options["terabox_password"]))
+
+    # 3. 서버 전역 설정(auto_passwords, terabox_password)에 사전 등록된 비밀번호 목록
+    try:
+        import config
+
+        settings = config.load_settings()
+        if settings:
+            if settings.get("auto_passwords"):
+                candidates.extend(parse_password_list(settings.get("auto_passwords")))
+            if settings.get("terabox_password"):
+                candidates.extend(parse_password_list(settings.get("terabox_password")))
+    except Exception:
+        pass
+
+    # 순서 유지 중복 제거
+    seen = set()
+    unique_candidates: list[str] = []
+    for cand in candidates:
+        if cand and cand not in seen:
+            seen.add(cand)
+            unique_candidates.append(cand)
+
+    return unique_candidates
+
+
 def extract_service_password(
     url: str,
     options: dict | None = None,
@@ -452,23 +574,34 @@ def extract_service_password(
         elif len(frag) <= max_short_len and not ("/" in frag):
             pwd = frag
 
-    if not pwd and options:
-        pwd = str(
-            options.get("password")
-            or options.get("pwd")
-            or options.get("code")
-            or options.get("terabox_password")
-            or ""
-        ).strip()
+    if not pwd and options and isinstance(options, dict):
+        for k in ("password", "pwd", "code", "auto_passwords", "terabox_password"):
+            val = options.get(k)
+            if val:
+                pwds = parse_password_list(val)
+                if pwds:
+                    pwd = pwds[0]
+                    break
 
     if not pwd and (
         options is None
-        or ("password" not in options and "terabox_password" not in options)
+        or (
+            "password" not in options
+            and "auto_passwords" not in options
+            and "terabox_password" not in options
+        )
     ):
         try:
             import config
 
-            pwd = str(config.load_settings().get("terabox_password") or "").strip()
+            settings = config.load_settings()
+            for k in ("auto_passwords", "terabox_password"):
+                val = settings.get(k)
+                if val:
+                    pwds = parse_password_list(val)
+                    if pwds:
+                        pwd = pwds[0]
+                        break
         except Exception:
             pass
 

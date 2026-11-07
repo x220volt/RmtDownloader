@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from contextlib import contextmanager
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 def find_browser_path() -> Optional[str]:
     """시스템에 설치된 Chrome 또는 Edge 브라우저 실행 경로를 탐색합니다."""
+    env_browser = os.environ.get("CHROME_PATH") or os.environ.get("BROWSER_PATH")
+    if env_browser and os.path.exists(env_browser):
+        return env_browser
+
     candidates = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -28,7 +33,7 @@ def find_browser_path() -> Optional[str]:
     for c in candidates:
         if c and os.path.exists(c):
             return c
-    for exe in ("chrome", "google-chrome", "chromium", "msedge"):
+    for exe in ("chrome", "google-chrome", "chromium", "chromium-browser", "msedge"):
         p = shutil.which(exe)
         if p and os.path.exists(p):
             return p
@@ -47,9 +52,15 @@ def stealth_browser_session(
     browser_path = find_browser_path()
     temp_dir = tempfile.mkdtemp(prefix=prefix)
     co = ChromiumOptions()
-    co.headless(
-        False
-    )  # Turnstile 신뢰성 우회를 위해 headed 모드 사용 (위치를 화면 밖으로 배치)
+
+    # Linux 환경에서 X11/Xvfb 디스플레이가 없으면 헤드리스 모드로 자동 전환
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        co.headless(True)
+    else:
+        co.headless(
+            False
+        )  # Turnstile 신뢰성 우회를 위해 headed 모드 사용 (위치를 화면 밖으로 배치)
+
     if browser_path:
         co.set_browser_path(browser_path)
     co.set_user_data_path(temp_dir)
@@ -59,6 +70,10 @@ def stealth_browser_session(
     co.set_argument("--mute-audio")
     co.set_argument("--no-first-run")
     co.set_argument("--no-default-browser-check")
+    # Docker 및 Linux 컨테이너 환경 필수 호환 옵션
+    co.set_argument("--no-sandbox")
+    co.set_argument("--disable-dev-shm-usage")
+    co.set_argument("--disable-gpu")
 
     page = None
     try:

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.47') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.48') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.47') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.48') }}</p>
         </div>
       </div>
 
@@ -181,7 +181,7 @@
               type="text"
               id="teraboxPwdInput"
               class="terabox-pwd-input"
-              placeholder="TeraBox 암호"
+              placeholder="공유 암호 (비워두면 등록 암호 자동 시도)"
               autocomplete="off"
             >
           </div>
@@ -310,7 +310,7 @@
               📁 일반 & 저장
             </button>
             <button type="button" class="settings-tab-btn" data-settings-tab="cloud">
-              ☁️ 클라우드 계정
+              ☁️ 클라우드 & 공유 암호
             </button>
             <button type="button" class="settings-tab-btn" data-settings-tab="automation">
               🤖 자동화 감시
@@ -423,7 +423,7 @@
               </p>
               <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
                 <div style="font-size: 0.83rem;">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.47') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.48') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -435,9 +435,50 @@
             </div>
           </div>
 
-          <!-- 2. 클라우드 계정 탭 -->
+          <!-- 2. 클라우드 & 공유 암호 탭 -->
           <div class="settings-tab-pane" id="settingsTabCloud">
-            <!-- TeraBox 카드 -->
+            <!-- 1. 공유 링크 비밀번호 자동 시도 카드 (공통 / 스마트폰 숏컷 대응) -->
+            <div class="settings-card">
+              <div class="settings-card-title">
+                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); font-size: 0.8rem; padding: 4px 8px;">Auto Passwords</span>
+                <span>🔑 공유 링크 비밀번호 자동 시도 (공통 암호 / 스마트폰 숏컷 대응)</span>
+              </div>
+              <p style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 12px;">
+                스마트폰(아이폰 단축어 / 안드로이드)으로 링크를 바로 공유할 때나 수동 암호 입력을 생략하고 싶을 때,
+                자주 사용하는 공유 암호들을 미리 등록해두면 암호로 보호된 링크를 만났을 때 <strong>서버가 등록된 비밀번호들을 순서대로 자동 대입</strong>하여 다운로드를 진행합니다.
+              </p>
+
+              <div class="form-group" style="margin-bottom: 12px;">
+                <label class="form-label" for="settingAutoPasswords">사전 등록 비밀번호 목록 (공통 자동 대입)</label>
+                <input type="text" id="settingAutoPasswords" class="form-input" placeholder="예: 1234, abcd, 2026, 7777 (쉼표, 세미콜론, 줄바꿈 또는 띄어쓰기로 구분)" autocomplete="off">
+                <input type="hidden" id="settingTeraboxPassword">
+                <span class="form-help">
+                  쉼표(,), 세미콜론(;), 줄바꿈, 띄어쓰기로 여러 개의 암호를 등록할 수 있습니다. (왼쪽부터 1순위로 시도)
+                </span>
+              </div>
+
+              <!-- 작동 방식 및 지원 서비스 안내 박스 -->
+              <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.22); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 0.8rem; line-height: 1.6; color: #cbd5e1;">
+                <div style="font-weight: 700; color: #d8b4fe; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span>💡 어떻게 동작하나요?</span>
+                </div>
+                <ul style="margin: 0 0 8px 18px; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem;">
+                  <li><strong>우선순위 1:</strong> 링크나 본문 텍스트에 암호가 명시되어 있는 경우(예: <code>?pwd=비번</code>, <code>추출코드: 비번</code>) 해당 암호를 최우선으로 시도합니다.</li>
+                  <li><strong>우선순위 2:</strong> 암호가 없는 링크이거나 1차 시도가 실패했을 때, 여기에 등록된 비밀번호들을 <strong>첫 번째부터 차례대로 대입</strong>합니다.</li>
+                  <li><strong>우선순위 3:</strong> 올바른 암호가 확인되면 즉시 다운로드를 시작하며, 모든 암호가 틀린 경우에만 시도했던 암호 목록과 함께 오류를 안내합니다.</li>
+                </ul>
+                <div style="border-top: 1px dashed rgba(168, 85, 247, 0.25); padding-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 0.76rem; color: #a78bfa;">
+                  <span>지원 서비스:</span>
+                  <span class="badge" style="background: rgba(14, 165, 233, 0.2); color: #38bdf8; padding: 2px 6px;">TeraBox</span>
+                  <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; padding: 2px 6px;">GoFile</span>
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; padding: 2px 6px;">GigaFile</span>
+                  <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; padding: 2px 6px;">Transfer.it</span>
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; padding: 2px 6px;">FileKeeper</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. TeraBox 전용 카드 (순수 테라박스 옵션만 분리) -->
             <div class="settings-card">
               <div class="settings-card-title">
                 <span class="badge badge-terabox" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.3); font-size: 0.8rem; padding: 4px 8px;">TeraBox</span>
@@ -459,7 +500,7 @@
                 <span class="form-help">내 테라박스에 저장하기 선택 시 파일이 보관될 내 드라이브 폴더 경로입니다.</span>
               </div>
 
-              <div class="form-group">
+              <div class="form-group" style="margin-bottom: 0;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                   <label class="form-label" for="settingTeraboxCookie" style="margin-bottom: 0;">TeraBox 계정 쿠키 ndus (선택사항)</label>
                   <button type="button" class="btn btn-secondary" id="toggleTeraboxCookieHelp" style="font-size: 0.74rem; padding: 2px 8px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.1); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
@@ -468,7 +509,7 @@
                   </button>
                 </div>
                 <input type="text" id="settingTeraboxCookie" class="form-input" placeholder="브라우저 개발자 도구에서 복사한 ndus 값 또는 전체 쿠키 붙여넣기" autocomplete="off">
-                <span class="form-help">테라박스 고속 다운로드 및 내 클라우드 즉시 저장 기능을 위해 사용됩니다.</span>
+                <span class="form-help">테라박스 대용량/고속 다운로드 및 내 계정 클라우드 보관 기능을 위해 사용됩니다.</span>
 
                 <!-- 테라박스 쿠키 확인 가이드 상자 -->
                 <div id="teraboxCookieHelpBox" style="display: none; margin-top: 10px; background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 0.8rem; line-height: 1.55; color: #cbd5e1;">
@@ -506,12 +547,6 @@
                     💡 <strong>팁:</strong> 개발자 도구의 Network 탭 등에서 <code>ndus=...; ...</code> 형태의 전체 쿠키 문자열을 복사해서 붙여넣어도 프로그램이 자동으로 <code>ndus</code> 값만 추출하여 적용합니다.
                   </div>
                 </div>
-              </div>
-
-              <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label" for="settingTeraboxPassword">TeraBox 기본 공유 암호 (선택사항)</label>
-                <input type="text" id="settingTeraboxPassword" class="form-input" placeholder="암호 걸린 링크에 공통 적용할 기본 비밀번호" autocomplete="off">
-                <span class="form-help">다운로드 링크에 비밀번호가 생략되었을 때 자동으로 대입할 기본 추출 암호입니다.</span>
               </div>
             </div>
 
@@ -731,6 +766,9 @@
                   <div style="font-size: 0.76rem; color: var(--text-muted); line-height: 1.5; margin-top: 8px; background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 6px;">
                     💡 <strong>중요 포인트:</strong> 붙여넣은 주소 맨 끝의 <code>[단축어 입력]</code> 글자는 지우고, 아이폰 키보드 바로 위 변수 바에서 파란색 <strong>[단축어 입력]</strong> 알약을 터치해 끼워 넣으세요.
                   </div>
+                  <div style="font-size: 0.76rem; color: #bae6fd; line-height: 1.5; margin-top: 8px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 8px 10px; border-radius: 6px;">
+                    🔑 <strong>암호 걸린 공유 링크 팁:</strong> 폰에서 공유할 때 암호 입력이 번거로우신가요? <strong>[⚙️ 설정 ➔ ☁️ 클라우드 & 공유 암호]</strong>에서 자주 쓰는 비밀번호들(예: <code>1234, abcd</code> 등)을 미리 등록해두시면, 단축어로 링크만 툭 공유해도 서버가 알아서 차례대로 자동 시도합니다!
+                  </div>
                 </div>
               </div>
 
@@ -894,6 +932,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.47') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.48') }}"></script>
 </body>
 </html>

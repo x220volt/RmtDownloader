@@ -140,7 +140,7 @@ async function initServerInfo() {
       }
       const teraboxPwdInput = document.getElementById('teraboxPwdInput');
       if (teraboxPwdInput) {
-        teraboxPwdInput.placeholder = 'TeraBox 암호';
+        teraboxPwdInput.placeholder = '공유 암호 (비워두면 등록 암호 자동 시도)';
       }
       if (serverInfo.username) {
         const currentUsernameText = document.getElementById('currentUsernameText');
@@ -1572,8 +1572,11 @@ async function openSettings() {
       settingMaxWorkers.value = data.max_concurrent_downloads || 3;
       settingGofileToken.value = data.gofile_token || '';
       if (settingTeraboxCookie) settingTeraboxCookie.value = data.terabox_cookie || '';
+      const autoPwdVal = data.auto_passwords || data.terabox_password || '';
+      const settingAutoPasswords = document.getElementById('settingAutoPasswords');
+      if (settingAutoPasswords) settingAutoPasswords.value = autoPwdVal;
       const settingTeraboxPassword = document.getElementById('settingTeraboxPassword');
-      if (settingTeraboxPassword) settingTeraboxPassword.value = data.terabox_password || '';
+      if (settingTeraboxPassword) settingTeraboxPassword.value = data.terabox_password || autoPwdVal;
 
       const settingTeraboxMode = document.getElementById('settingTeraboxMode');
       const settingTeraboxSavePath = document.getElementById('settingTeraboxSavePath');
@@ -1668,7 +1671,8 @@ async function saveSettings(e) {
     max_concurrent_downloads: parseInt(settingMaxWorkers.value, 10) || 3,
     gofile_token: settingGofileToken.value.trim(),
     terabox_cookie: settingTeraboxCookie ? settingTeraboxCookie.value.trim() : '',
-    terabox_password: document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : '',
+    auto_passwords: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
+    terabox_password: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
     terabox_mode: settingTeraboxMode ? settingTeraboxMode.value : 'download',
     terabox_save_path: settingTeraboxSavePath ? (settingTeraboxSavePath.value.trim() || '/') : '/',
     auto_subfolder: settingAutoSubfolder ? settingAutoSubfolder.checked : true,
@@ -1758,12 +1762,13 @@ async function saveSettings(e) {
       if (serverInfo) {
         serverInfo.terabox_mode = payload.terabox_mode;
         serverInfo.terabox_password = payload.terabox_password || '';
+        serverInfo.auto_passwords = payload.auto_passwords || payload.terabox_password || '';
         serverInfo.capture_source_page = Boolean(payload.capture_source_page);
       }
 
       const teraboxPwdInput = document.getElementById('teraboxPwdInput');
       if (teraboxPwdInput) {
-        teraboxPwdInput.placeholder = 'TeraBox 암호';
+        teraboxPwdInput.placeholder = '공유 암호 (비워두면 등록 암호 자동 시도)';
       }
       if (payload.auth_username) {
         const currentUsernameText = document.getElementById('currentUsernameText');

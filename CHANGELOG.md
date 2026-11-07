@@ -4,6 +4,35 @@
 
 ---
 
+## [v0.1.48] - 2026-11-07
+
+### 🔑 공유 링크 비밀번호 다중 자동 시도 (Auto Passwords) 및 클라우드 설정 UI 개편
+* **사전 등록 암호 다중 순차 자동 대입 (`config.py`, `downloader/url_helper.py`)**:
+  * 모바일 단축어(iOS Shortcut / Android 공유) 등으로 공유 시 비밀번호를 수동 입력하기 어려운 환경을 위해, 설정에 여러 암호를 사전 등록(`auto_passwords`)해 두면 링크 해석 시 자동으로 순차 대입.
+  * 지원 리졸버: `TeraBox`, `GoFile`, `GigaFile`, `Transfer.it`, `FileKeeper`.
+  * 암호 해석 우선순위 체계화: 링크 텍스트 암호(?pwd=...) ➔ 수동 옵션 암호 ➔ 사전 등록 자동 시도 암호 순 적용.
+* **설정 UI 분리 및 직관화 (`templates/index.html`, `static/js/app.js`)**:
+  * 기존 `☁️ 클라우드 계정` 탭 명칭을 `☁️ 클라우드 & 공유 암호`로 변경.
+  * 테라박스 전용 카드에서 공유 링크 비밀번호 영역을 독립된 별도 카드(동작 원리 및 지원 서비스 뱃지 포함)로 깔끔하게 분리.
+  * 대시보드 암호 입력란 힌트 문구 개선.
+
+### 🐳 도커(Docker) 및 시놀로지 NAS(Synology DSM Container Manager) 완벽 지원
+* **공식 Docker 배포 구성 파일 제공 (`Dockerfile`, `docker-compose.yml`, `docker-entrypoint.sh`, `.dockerignore`)**:
+  * `python:3.11-slim-bookworm` 기반 경량 고효율 컨테이너 이미지.
+  * `aria2`, `chromium`, `chromium-driver`, `xvfb`, `fonts-nanum`, `fonts-noto-cjk`, `gosu`, `nodejs`, Qt6 런타임 라이브러리 내장.
+* **시놀로지 NAS 전용 권한 및 환경 최적화**:
+  * `PUID` / `PGID` 환경 변수와 `gosu` 권한 강등을 통해 NAS 파일 스테이션/SMB 공유 폴더 권한 충돌 완벽 방지.
+  * 헤드리스(모니터 없는) NAS에서도 가상 X11 버퍼(`Xvfb`) 및 CJK 나눔 글꼴 탑재로 Cloudflare Turnstile 우회 및 웹페이지 캡처 정상 작동.
+  * `CONFIG_DIR=/config`, `DOWNLOAD_DIR=/downloads` 환경 변수 매핑 지원 및 Windows 경로 자동 보정.
+  * 도커 환경 감지 시 서버 업데이트 및 파일 탐색기 열기 예외 안내 처리.
+  * GoFile 웹 토큰 해석 시 PyQt6 QJSEngine 외에 `nodejs` 백엔드 폴백 지원.
+
+### 🧪 단위 테스트 검증
+* 공유 비밀번호 다중 시도 및 우선순위 검증 단위 테스트 8건 추가 (`tests/test_auto_passwords.py`).
+* 전체 단위 테스트 205건 100% 통과 (`OK (skipped=13)`).
+
+---
+
 ## [v0.1.47] - 2026-11-07
 
 ### ☁️ 신규 해외 클라우드 호스팅 Buzzheavier 지원

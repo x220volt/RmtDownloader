@@ -154,42 +154,60 @@ class GigaFileResolver(BaseResolver):
                         is_dlkey_required = True
 
             if is_dlkey_required:
-                if not dlkey:
+                from ..url_helper import get_candidate_passwords
+
+                candidates = get_candidate_passwords(url, opts)
+                if dlkey and dlkey not in candidates:
+                    candidates.insert(0, dlkey)
+
+                if not candidates:
                     raise ValueError(
                         "이 기가파일(GigaFile) 링크는 다운로드 키(비밀번호 4자리)가 필요합니다.\n"
-                        "링크 뒤에 ?dlkey=비밀번호 형태로 입력하거나 설정/암호 입력칸에 입력해 주세요."
+                        "웹 대시보드 ⚙️ 설정에서 공통 비밀번호를 등록하거나, 링크 뒤에 ?dlkey=비밀번호 형태로 입력해 주세요."
                     )
 
-                # 다운로드 키 유효성 사전 검사
+                # 다운로드 키 유효성 사전 검사 (후보군 순차 검증)
                 check_url = f"https://{server}/check_dlkey.php"
-                try:
-                    c_resp = session.get(
-                        check_url,
-                        params={"file": file_id, "dlkey": dlkey, "is_zip": 0},
-                        headers={"Referer": final_url},
-                        timeout=15,
+                matched_key = None
+                tried_keys = []
+                for idx, cand in enumerate(candidates, 1):
+                    tried_keys.append(cand)
+                    try:
+                        logger.info(
+                            f"기가파일 다운로드 키 확인 시도 ({idx}/{len(candidates)}): '{cand}'"
+                        )
+                        c_resp = session.get(
+                            check_url,
+                            params={"file": file_id, "dlkey": cand, "is_zip": 0},
+                            headers={"Referer": final_url},
+                            timeout=15,
+                        )
+                        if c_resp.ok:
+                            c_data = c_resp.json()
+                            status = c_data.get("status")
+                            if status == 0:
+                                matched_key = cand
+                                logger.info(f"기가파일 다운로드 키 인증 성공: '{cand}'")
+                                break
+                            elif status == 3:
+                                raise ValueError(
+                                    "기가파일 비밀번호 입력 오류 횟수 초과로 일시적으로 접근이 차단되었습니다."
+                                )
+                            elif status != 1:
+                                logger.warning(
+                                    f"check_dlkey 응답 코드({status}), 계속 시도합니다."
+                                )
+                    except ValueError:
+                        raise
+                    except Exception as e:
+                        logger.warning(f"기가파일 check_dlkey 시도 중 오류: {e}")
+
+                if not matched_key:
+                    tried_str = ", ".join(repr(k) for k in tried_keys)
+                    raise ValueError(
+                        f"기가파일 다운로드 키(비밀번호)가 일치하지 않습니다 (시도한 키: {tried_str}). 올바른 비밀번호를 확인해 주세요."
                     )
-                    if c_resp.ok:
-                        c_data = c_resp.json()
-                        status = c_data.get("status")
-                        if status == 1:
-                            raise ValueError(
-                                f"기가파일 다운로드 키(비밀번호: '{dlkey}')가 일치하지 않습니다. 올바른 비밀번호를 확인해 주세요."
-                            )
-                        elif status == 3:
-                            raise ValueError(
-                                "기가파일 비밀번호 입력 오류 횟수 초과로 일시적으로 접근이 차단되었습니다."
-                            )
-                        elif status != 0:
-                            logger.warning(
-                                f"check_dlkey 응답 코드({status}), 계속 다운로드를 시도합니다."
-                            )
-                except ValueError:
-                    raise
-                except Exception as e:
-                    logger.warning(
-                        f"check_dlkey 확인 통신 실패 ({e}), 계속 진행합니다."
-                    )
+                dlkey = matched_key
 
             # 5. 원본 파일명 추출 (AJAX API 호출)
             filename = ""

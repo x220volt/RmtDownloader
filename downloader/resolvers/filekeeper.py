@@ -165,35 +165,51 @@ class FileKeeperResolver(BaseResolver):
                         "method_free": method,
                         "down_direct": "1",
                     }
-                    if has_pwd and options:
-                        pwd = options.get("password") or options.get("pwd") or options.get("pass")
-                        if pwd:
-                            post_data["password"] = str(pwd).strip()
+                    from ..url_helper import get_candidate_passwords
 
-                    try:
-                        post_resp = session.post(
-                            "https://filekeeper.net/download",
-                            data=post_data,
-                            headers=req_headers,
-                            allow_redirects=False,
-                            timeout=REQUEST_TIMEOUT,
-                        )
-                        if post_resp.status_code in (301, 302, 303, 307, 308) and "Location" in post_resp.headers:
-                            direct_url = post_resp.headers["Location"]
-                        elif "Location" in post_resp.headers:
-                            direct_url = post_resp.headers["Location"]
-                        else:
-                            post_soup = BeautifulSoup(post_resp.text, "html.parser")
-                            dl_link = post_soup.find("a", id="download-link") or post_soup.find(
-                                "a", href=re.compile(r"fetchio|/d/|download")
+                    candidates = (
+                        get_candidate_passwords(url, options) if has_pwd else [""]
+                    )
+                    if not candidates:
+                        candidates = [""]
+
+                    for cand in candidates:
+                        if cand:
+                            post_data["password"] = cand
+                        try:
+                            post_resp = session.post(
+                                "https://filekeeper.net/download",
+                                data=post_data,
+                                headers=req_headers,
+                                allow_redirects=False,
+                                timeout=REQUEST_TIMEOUT,
                             )
-                            if dl_link and dl_link.get("href"):
-                                direct_url = str(dl_link.get("href"))
+                            if (
+                                post_resp.status_code in (301, 302, 303, 307, 308)
+                                and "Location" in post_resp.headers
+                            ):
+                                direct_url = post_resp.headers["Location"]
+                                break
+                            elif "Location" in post_resp.headers:
+                                direct_url = post_resp.headers["Location"]
+                                break
                             else:
-                                need_browser_fallback = True
-                    except Exception as e:
-                        logger.warning(f"[FileKeeper] 다운로드 요청 실패 ({e}), 스텔스 브라우저로 전환합니다.")
-                        need_browser_fallback = True
+                                post_soup = BeautifulSoup(post_resp.text, "html.parser")
+                                dl_link = post_soup.find(
+                                    "a", id="download-link"
+                                ) or post_soup.find(
+                                    "a", href=re.compile(r"fetchio|/d/|download")
+                                )
+                                if dl_link and dl_link.get("href"):
+                                    direct_url = str(dl_link.get("href"))
+                                    break
+                                elif not has_pwd:
+                                    need_browser_fallback = True
+                        except Exception as e:
+                            logger.warning(
+                                f"[FileKeeper] 다운로드 요청 실패 ({e}), 스텔스 브라우저로 전환합니다."
+                            )
+                            need_browser_fallback = True
 
         # 필요시 스텔스 브라우저 폴백
         cookie_dict: dict = {}
@@ -236,22 +252,30 @@ class FileKeeperResolver(BaseResolver):
                         "method_free": method,
                         "down_direct": "1",
                     }
-                    if options:
-                        pwd = options.get("password") or options.get("pwd") or options.get("pass")
-                        if pwd:
-                            post_data["password"] = str(pwd).strip()
+                    from ..url_helper import get_candidate_passwords
 
-                    # 브라우저 컨텍스트에서 POST 요청 실행 또는 폼 제출
-                    post_resp = session.post(
-                        "https://filekeeper.net/download",
-                        data=post_data,
-                        headers=req_headers,
-                        cookies=cookie_dict,
-                        allow_redirects=False,
-                        timeout=REQUEST_TIMEOUT,
-                    )
-                    if post_resp.status_code in (301, 302, 303, 307, 308) and "Location" in post_resp.headers:
-                        direct_url = post_resp.headers["Location"]
+                    candidates = get_candidate_passwords(url, options)
+                    if not candidates:
+                        candidates = [""]
+
+                    for cand in candidates:
+                        if cand:
+                            post_data["password"] = cand
+                        # 브라우저 컨텍스트에서 POST 요청 실행 또는 폼 제출
+                        post_resp = session.post(
+                            "https://filekeeper.net/download",
+                            data=post_data,
+                            headers=req_headers,
+                            cookies=cookie_dict,
+                            allow_redirects=False,
+                            timeout=REQUEST_TIMEOUT,
+                        )
+                        if (
+                            post_resp.status_code in (301, 302, 303, 307, 308)
+                            and "Location" in post_resp.headers
+                        ):
+                            direct_url = post_resp.headers["Location"]
+                            break
 
                 if not direct_url:
                     # 다운로드 버튼 클릭 시도
