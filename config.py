@@ -14,7 +14,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.48"
+APP_VERSION = "0.1.49"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
 _env_config = os.environ.get("CONFIG_DIR")

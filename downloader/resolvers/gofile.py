@@ -82,6 +82,7 @@ def _find_wt_script_urls(html: str):
 
 
 def _evaluate_hash_input(script: str) -> str:
+    # 1. PyQt6 QJSEngine 시도 (Windows 및 Qt6 그래픽 라이브러리가 갖춰진 환경)
     try:
         _ensure_qcore_app()
         from PyQt6.QtQml import QJSEngine
@@ -115,44 +116,77 @@ def _evaluate_hash_input(script: str) -> str:
 
         return val.toString()
     except Exception as qjs_err:
-        node_exe = shutil.which("node") or shutil.which("nodejs")
-        if node_exe:
-            try:
-                js_code = (
-                    f"var navigator = {{userAgent: {json.dumps(GOFILE_USER_AGENT)}, language: {json.dumps(GOFILE_LANGUAGE)}}};\n"
-                    f"var window = globalThis; window.navigator = navigator;\n"
-                    f"window.location = {{hostname: 'gofile.io', search: ''}};\n"
-                    f"{script}\n"
-                    f"var __gofileHashInput = '';\n"
-                    f"_sha256 = function(v) {{ __gofileHashInput = String(v); return '0'.repeat(64); }};\n"
-                    f"generateWT({json.dumps(WT_PROBE_TOKEN)});\n"
-                    f"process.stdout.write(__gofileHashInput);\n"
-                )
-                proc = subprocess.run(
-                    [node_exe, "-e", js_code],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if proc.returncode == 0 and proc.stdout.strip():
-                    return proc.stdout.strip()
-            except Exception as node_err:
-                logger.warning(f"Node.js 대체 평가 실패: {node_err}")
-        raise qjs_err
+        logger.info(
+            f"PyQt6 JS 엔진 사용 불가({qjs_err}). 대체 실행 엔진(Node/Browser)으로 자동 전환합니다."
+        )
+
+    # 2. Node.js CLI 시도 (Linux / Docker 가벼운 런타임 환경)
+    node_exe = shutil.which("node") or shutil.which("nodejs")
+    if node_exe:
+        try:
+            js_code = (
+                f"var navigator = {{userAgent: {json.dumps(GOFILE_USER_AGENT)}, language: {json.dumps(GOFILE_LANGUAGE)}}};\n"
+                f"var window = globalThis; window.navigator = navigator;\n"
+                f"window.location = {{hostname: 'gofile.io', search: ''}};\n"
+                f"{script}\n"
+                f"var __gofileHashInput = '';\n"
+                f"_sha256 = function(v) {{ __gofileHashInput = String(v); return '0'.repeat(64); }};\n"
+                f"generateWT({json.dumps(WT_PROBE_TOKEN)});\n"
+                f"process.stdout.write(__gofileHashInput);\n"
+            )
+            proc = subprocess.run(
+                [node_exe, "-e", js_code],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+        except Exception as node_err:
+            logger.debug(f"Node.js 대체 평가 실패: {node_err}")
+
+    # 3. 로컬 브라우저 세션(DrissionPage / Chromium) 시도 (NAS 도커 등 브라우저 환경)
+    try:
+        from ..browser_solver import stealth_browser_session
+
+        with stealth_browser_session(prefix="gofile_eval_") as page:
+            page.get("about:blank")
+            page.run_js("window.eval(arguments[0]);", script)
+            page.run_js(
+                "_sha256 = function(v) { window.__probe = String(v); return '0'.repeat(64); };"
+            )
+            raw = page.run_js(
+                f"generateWT({json.dumps(WT_PROBE_TOKEN)}); return window.__probe;"
+            )
+            if raw and WT_PROBE_TOKEN in str(raw):
+                return str(raw)
+    except Exception as browser_err:
+        logger.debug(f"DrissionPage GoFile JS 평가 실패: {browser_err}")
+
+    raise RuntimeError(
+        "GoFile 웹 토큰 생성 실패: 사용 가능한 JS 실행 환경(PyQt6, Node.js, Chromium)이 없습니다."
+    )
 
 
 def _extract_secret_from_script(script: str) -> str:
     raw = _evaluate_hash_input(script)
+    probe_needle = f"::{WT_PROBE_TOKEN}::"
+    if probe_needle in raw:
+        _, _, remainder = raw.partition(probe_needle)
+        window, sep, secret = remainder.partition("::")
+        secret = secret.strip()
+        if sep and window.isdigit() and re.fullmatch(r"[A-Za-z0-9._-]{6,128}", secret):
+            return secret
+
     prefix = f"{GOFILE_USER_AGENT}::{GOFILE_LANGUAGE}::{WT_PROBE_TOKEN}::"
-    if not raw.startswith(prefix):
-        raise ValueError("GoFile 인증 토큰 형식이 변경되었습니다.")
-    remainder = raw[len(prefix) :]
-    window, sep, secret = remainder.partition("::")
-    if not sep or not window.isdigit():
-        raise ValueError("GoFile 인증 토큰 시간 파싱 실패")
-    if not re.fullmatch(r"[A-Za-z0-9._-]{6,128}", secret):
-        raise ValueError("GoFile secret 형식이 비정상입니다.")
-    return secret
+    if raw.startswith(prefix):
+        remainder = raw[len(prefix) :]
+        window, sep, secret = remainder.partition("::")
+        secret = secret.strip()
+        if sep and window.isdigit() and re.fullmatch(r"[A-Za-z0-9._-]{6,128}", secret):
+            return secret
+
+    raise ValueError("GoFile 인증 토큰 형식이 변경되었습니다.")
 
 
 def get_gofile_secret(session: requests.Session) -> str:

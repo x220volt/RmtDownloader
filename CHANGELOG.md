@@ -4,6 +4,19 @@
 
 ---
 
+## [v0.1.49] - 2026-11-07
+
+### 🩹 Linux/NAS 도커 환경 GoFile 토큰 추출 3단계 안전 폴백 탑재 (`downloader/resolvers/gofile.py`)
+* **`libEGL.so.1` 누락 및 PyQt6 미지원 환경 자동 극복**:
+  * Linux/Docker 환경에서 `libEGL.so.1` 등 그래픽 런타임 공유 라이브러리가 없는 경우 `QJSEngine` 초기화 시 크래시되던 문제 해결.
+  * **3단계 다중 폴백 엔진 구축**:
+    1. Tier 1: `PyQt6 QJSEngine` (Windows 및 풀 데스크톱 환경)
+    2. Tier 2: `Node.js` CLI (경량 서버/컨테이너 환경)
+    3. Tier 3: `DrissionPage` / Chromium 무음 세션 (`about:blank` 가상 컨텍스트에서 JS 안전 평가)
+  * 브라우저/Node 환경별 다양한 User-Agent 및 Language 문자열과 무관하게 `WT_PROBE_TOKEN` 기반으로 secret을 유연하게 추출하도록 파싱 로직 개선.
+
+---
+
 ## [v0.1.48] - 2026-11-07
 
 ### 🔑 공유 링크 비밀번호 다중 자동 시도 (Auto Passwords) 및 클라우드 설정 UI 개편
