@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.55') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.56') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.55') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.56') }}</p>
         </div>
       </div>
 
@@ -337,7 +337,7 @@
               <span class="form-help">다운로드된 파일이 저장될 서버 PC의 로컬 디렉토리 경로입니다.</span>
             </div>
 
-            <div class="settings-grid-2col" style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+            <div class="settings-grid-2col">
               <div>
                 <label class="form-label" for="settingPort">서버 포트 (Port)</label>
                 <input type="number" id="settingPort" class="form-input" min="1" max="65535" value="7971" required>
@@ -404,7 +404,7 @@
                   <span style="font-weight: 600; color: #fff;">⚡ aria2c 고속 분할 다운로드 가속 (HTTP/HTTPS)</span>
                 </label>
                 <span class="form-help" style="margin-left: 24px; margin-top: 4px;">내장된 aria2c C++ 엔진을 활용하여 파일을 여러 개(기본 8개)의 청크 세그먼트로 동시 분할 다운로드합니다. 해외 호스팅(kio.ac, GoFile, MegaUp 등)의 다운로드 속도를 최대 3~10배 가속합니다.</span>
-                <div id="settingAria2HttpSplitWrapper" style="margin-left: 24px; margin-top: 8px; display: flex; align-items: center; gap: 10px;">
+                <div id="settingAria2HttpSplitWrapper" class="aria2-split-wrapper">
                   <label class="form-label" for="settingAria2HttpSplit" style="margin-bottom: 0; font-size: 0.85rem; color: var(--text-muted);">분할 연결 수 (동시 세그먼트):</label>
                   <input type="number" id="settingAria2HttpSplit" class="form-input" min="1" max="16" value="8" style="width: 75px; padding: 4px 8px; font-size: 0.85rem;">
                   <span class="form-help" style="margin: 0;">(1 ~ 16개 연결 권장, 기본 8개)</span>
@@ -414,20 +414,20 @@
 
             <!-- 본 프로그램 버전 및 업데이트 카드 -->
             <div class="settings-card" style="margin-top: 14px; margin-bottom: 0;">
-              <div class="settings-card-title" style="display:flex; justify-content:space-between; align-items:center;">
+              <div class="settings-card-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                 <span>🚀 Remote Downloader 프로그램 업데이트</span>
                 <span class="badge" id="appVersionStatusBadge" style="background: rgba(59,130,246,0.15); color: #60a5fa; font-size: 0.75rem;">확인 중...</span>
               </div>
               <p style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
                 GitHub 공식 릴리즈를 실시간 확인하여 클릭 한 번으로 최신 버전의 실행 파일로 안전하게 갱신하고 재시작합니다.
               </p>
-              <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-                <div style="font-size: 0.83rem;">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.55') }}</strong>
+              <div class="settings-update-row">
+                <div class="settings-update-vers">
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.56') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div class="settings-update-btns">
                   <button type="button" class="btn btn-sm btn-outline" id="modalCheckAppUpdateBtn">🔄 업데이트 확인</button>
                   <button type="button" class="btn btn-sm btn-accent hidden" id="modalApplyAppUpdateBtn">⚡ 지금 업데이트</button>
                 </div>
@@ -501,7 +501,7 @@
               </div>
 
               <div class="form-group" style="margin-bottom: 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <div class="cookie-label-row">
                   <label class="form-label" for="settingTeraboxCookie" style="margin-bottom: 0;">TeraBox 계정 쿠키 ndus (선택사항)</label>
                   <button type="button" class="btn btn-secondary" id="toggleTeraboxCookieHelp" style="font-size: 0.74rem; padding: 2px 8px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.1); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
                     <span>💡 쿠키(ndus) 알아내는 방법</span>
@@ -587,14 +587,14 @@
                   <input type="url" id="settingKoneBoardUrl" class="form-input" placeholder="https://kone.gg/s/retrogame">
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="settings-grid-2col" style="margin-bottom: 12px;">
                   <div>
                     <label class="form-label" for="settingKoneInterval">새 글 확인 주기 (초)</label>
                     <input type="number" id="settingKoneInterval" class="form-input" min="30" max="86400" value="180">
                     <span class="form-help" style="margin-top: 4px;">권장: 180초 (3분)</span>
                   </div>
                   <div>
-                    <label class="form-label" style="margin-top: 26px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <label class="form-label kone-subfolder-label" style="margin-top: 26px; display: flex; align-items: center; gap: 8px; cursor: pointer;">
                       <input type="checkbox" id="settingKoneSubfolder" checked style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
                       <span style="color: #e2e8f0; font-size: 0.86rem; font-weight: 500;">글 제목으로 하위폴더 분리</span>
                     </label>
@@ -602,7 +602,7 @@
                   </div>
                 </div>
 
-                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.3); padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.05); gap: 10px;">
+                <div class="kone-status-bar">
                   <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
                     <span id="koneStatusBadge" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #64748b; margin-right: 6px;"></span>
                     <span id="koneStatusText">대기 중</span>
@@ -613,11 +613,11 @@
                 </div>
 
                 <div id="koneWatermarkBox" style="margin-top: 10px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-sm); padding: 10px 12px;">
-                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+                  <div class="kone-watermark-header">
                     <span style="font-size: 0.78rem; font-weight: 700; color: #34d399;">
                       📌 현재 감시 기준점 (마지막으로 확인한 최신 게시글)
                     </span>
-                    <div style="display: flex; gap: 6px;">
+                    <div class="kone-watermark-actions">
                       <button type="button" class="btn btn-secondary" id="koneRescanLatestBtn" title="가장 최근에 올라온 일반 게시글 1개를 다시 스캔하여 다운로드 링크를 추출합니다." style="font-size: 0.72rem; padding: 3px 8px;">
                         🔁 최신 글 다시 스캔
                       </button>
@@ -655,10 +655,12 @@
               <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
                 스마트폰 단축어나 북마클릿에서 사용하는 <strong>다운로드 전용 토큰</strong>입니다. 웹 대시보드 로그인 권한이 없어 안전하며, 필요 시 언제든 재발급할 수 있습니다.
               </p>
-              <div class="api-token-row" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                <input type="text" id="settingApiToken" readonly class="form-input" style="font-family: monospace; color: #c084fc; background: rgba(0,0,0,0.3); font-size: 0.84rem; flex: 1; min-width: 140px;" placeholder="토큰 로딩 중...">
-                <button type="button" class="btn btn-secondary" id="copyApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 14px;">📋 복사</button>
-                <button type="button" class="btn btn-secondary" id="regenApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 12px; color: #f87171; border-color: rgba(239,68,68,0.3);">🔄 재발급</button>
+              <div class="api-token-row">
+                <input type="text" id="settingApiToken" readonly class="form-input" style="font-family: monospace; color: #c084fc; background: rgba(0,0,0,0.3); font-size: 0.84rem;" placeholder="토큰 로딩 중...">
+                <div class="api-token-actions">
+                  <button type="button" class="btn btn-secondary" id="copyApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 14px;">📋 복사</button>
+                  <button type="button" class="btn btn-secondary" id="regenApiTokenBtn" style="white-space: nowrap; font-size: 0.82rem; padding: 8px 12px; color: #f87171; border-color: rgba(239,68,68,0.3);">🔄 재발급</button>
+                </div>
               </div>
             </div>
 
@@ -759,7 +761,7 @@
                     <li>동작의 파란색 <strong>'URL'</strong> 자리를 터치하고 아래 주소를 복사해서 붙여넣기:</li>
                   </ol>
 
-                  <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="code-preview-row">
                     <input type="text" id="shortcutUrlPreview" readonly class="form-input" style="font-size: 0.8rem; background: rgba(0,0,0,0.4); color: #86efac; font-family: monospace;">
                     <button type="button" class="btn btn-primary" id="copyShortcutUrlBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 주소 복사</button>
                   </div>
@@ -784,7 +786,7 @@
                     <li><strong>모바일 크롬</strong>: 아무 페이지나 [★ 북마크 추가] ➔ 북마크 [수정] ➔ 이름: <code>PC로 전송</code>, URL: 아래 코드로 교체 후 저장</li>
                     <li><strong>사용법</strong>: 다운로드할 글에서 북마크를 터치(크롬은 주소창에 <code>PC로 전송</code> 입력 후 나오는 ★북마크 항목 터치)하면 즉시 전송됩니다!</li>
                   </ol>
-                  <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="code-preview-row">
                     <input type="text" id="androidBookmarkletPreview" readonly class="form-input" style="font-size: 0.78rem; background: rgba(0,0,0,0.4); color: #fde68a; font-family: monospace;">
                     <button type="button" class="btn btn-primary" id="copyAndroidBookmarkletBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 코드 복사</button>
                   </div>
@@ -801,7 +803,7 @@
                     <li>Shortcut Name(이름): <code>PC로 다운로드</code> 입력</li>
                     <li><strong>Basic Request Settings ➔ URL</strong> 칸에 아래 주소를 복사해 붙여넣기 (Method: GET 기본값 유지):</li>
                   </ol>
-                  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 10px;">
+                  <div class="code-preview-row" style="margin-bottom: 10px;">
                     <input type="text" id="androidShortcutUrlPreview" readonly class="form-input" style="font-size: 0.8rem; background: rgba(0,0,0,0.4); color: #86efac; font-family: monospace;">
                     <button type="button" class="btn btn-primary" id="copyAndroidShortcutBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 주소 복사</button>
                   </div>
@@ -827,7 +829,7 @@
                     <li>기존 URL(주소)을 지우고 아래 자바스크립트 코드를 붙여넣어 저장:</li>
                   </ol>
 
-                  <div style="display: flex; gap: 8px; align-items: center;">
+                  <div class="code-preview-row">
                     <input type="text" id="bookmarkletCodePreview" readonly class="form-input" style="font-size: 0.78rem; background: rgba(0,0,0,0.4); color: #fde68a; font-family: monospace;">
                     <button type="button" class="btn btn-primary" id="copyBookmarkletBtn" style="white-space: nowrap; padding: 8px 14px; font-size: 0.82rem;">📋 코드 복사</button>
                   </div>
@@ -932,6 +934,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.55') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.56') }}"></script>
 </body>
 </html>

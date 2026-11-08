@@ -1094,31 +1094,50 @@ body {
   border-color: rgba(14, 165, 233, 0.3) !important;
 }
 
+.job-source-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  min-width: 0;
+}
+
 .job-source-tag {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 600;
-  padding: 3px 8px;
+  padding: 3px 9px;
   border-radius: 6px;
-  background: rgba(56, 189, 248, 0.15);
+  background: rgba(56, 189, 248, 0.12);
   color: #7dd3fc;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border: 1px solid rgba(56, 189, 248, 0.32);
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.4;
+  transition: all 0.15s ease;
 }
 
 .job-source-tag:hover {
-  background: rgba(56, 189, 248, 0.25);
-  color: #e0f2fe;
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #bae6fd;
 }
 
 .job-source-tag a {
   color: inherit;
   text-decoration: none;
+  display: inline;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.job-source-tag a:hover {
+  text-decoration: underline;
 }
 
 .job-actions {
@@ -2055,14 +2074,31 @@ body {
     gap: 4px;
   }
 
-  .job-folder-tag,
+  .job-folder-tag {
+    max-width: 200px;
+  }
+
+  .job-source-row {
+    margin-top: 0;
+    margin-bottom: 2px;
+    width: 100%;
+  }
+
   .job-source-tag {
-    max-width: 160px;
+    max-width: 100% !important;
+    white-space: normal !important;
+    word-break: break-all !important;
+    overflow-wrap: anywhere !important;
+    font-size: 0.73rem !important;
+    line-height: 1.38 !important;
+    padding: 3px 8px !important;
   }
 
   .job-filename {
-    font-size: 0.88rem;
-    line-height: 1.4;
+    font-size: 0.9rem;
+    line-height: 1.42;
+    -webkit-line-clamp: 3;
+    word-break: break-word;
   }
 
   .job-meta {
@@ -2080,8 +2116,10 @@ body {
   .job-meta-right {
     width: 100%;
     justify-content: space-between;
-    gap: 8px;
+    align-items: center;
+    gap: 6px;
     margin-left: 0;
+    flex-wrap: wrap;
   }
 
   .job-time {
@@ -2096,25 +2134,191 @@ body {
     gap: 12px !important;
   }
 
-  /* 8. 모달 창 화면 높이 및 터치 최적화 */
+  /* 8. 설정 탭 네비게이션 가로 스와이프 */
+  .settings-tab-bar {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 6px;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+    width: 100%;
+  }
+
+  .settings-tab-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-tab-btn {
+    flex-shrink: 0;
+    padding: 7px 11px;
+    font-size: 0.78rem;
+    gap: 4px;
+  }
+
+  .settings-card {
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .aria2-split-wrapper {
+    margin-left: 0 !important;
+    margin-top: 6px !important;
+    gap: 6px !important;
+  }
+
+  .settings-update-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 10px 12px !important;
+  }
+
+  .settings-update-vers {
+    text-align: center;
+    font-size: 0.82rem;
+  }
+
+  .settings-update-btns {
+    width: 100% !important;
+    display: flex !important;
+    gap: 8px !important;
+  }
+
+  .settings-update-btns button {
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+
+  .kone-status-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .kone-status-bar button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .kone-watermark-actions {
+    width: 100% !important;
+    display: flex !important;
+    gap: 6px !important;
+  }
+
+  .kone-watermark-actions button {
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+
+  .kone-subfolder-label {
+    margin-top: 0 !important;
+  }
+
+  .api-token-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .api-token-row input {
+    width: 100% !important;
+  }
+
+  .api-token-actions {
+    width: 100% !important;
+    display: flex !important;
+    gap: 6px !important;
+  }
+
+  .api-token-actions button {
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+
+  .iphone-tab-bar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .iphone-tab-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .iphone-tab-bar .settings-subtab-btn {
+    flex-shrink: 0;
+  }
+
+  .save-path-hint span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .storage-stat-pill {
+    padding: 2px 6px;
+    font-size: 0.68rem;
+  }
+
+  /* 9. 모달 창 화면 높이 및 터치 최적화 */
   .modal-backdrop {
     padding: 6px;
   }
 
   .modal {
-    max-height: 92vh;
+    max-height: 94vh;
     border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
     margin: auto;
-    width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .modal-header {
+    padding: 12px 16px;
   }
 
   .modal-body {
-    padding: 14px;
+    padding: 12px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    max-height: calc(92vh - 110px);
+    max-height: calc(94vh - 110px);
+  }
+
+  .modal-actions {
+    position: sticky;
+    bottom: -12px;
+    background: #141926;
+    border-top: 1px solid var(--border-color);
+    padding: 12px 0 4px 0;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+
+  .modal-actions button {
+    flex: 1;
+    justify-content: center;
+    padding: 11px;
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+
+  /* iOS 사파리 폼 입력 포커스 시 화면 자동 확대 방지 */
+  .form-input,
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 
   .toast-container {
@@ -2125,6 +2329,18 @@ body {
 }
 
 @media (max-width: 480px) {
+  body {
+    padding: 6px 8px;
+  }
+
+  .app-container {
+    gap: 10px;
+  }
+
+  .header {
+    padding: 4px 0;
+  }
+
   .server-status-pill .status-text {
     display: none;
   }
@@ -2145,6 +2361,37 @@ body {
   .icon-btn {
     width: 32px;
     height: 32px;
+  }
+
+  .card {
+    padding: 10px 8px;
+  }
+
+  .job-item {
+    padding: 10px 8px;
+    gap: 6px;
+  }
+
+  .job-service-tag,
+  .job-mode-tag,
+  .job-folder-tag {
+    font-size: 0.68rem;
+    padding: 2px 6px;
+  }
+
+  .job-source-tag {
+    font-size: 0.72rem !important;
+    padding: 3px 7px !important;
+  }
+
+  .tab-btn {
+    padding: 6px 2px;
+    font-size: 0.73rem;
+  }
+
+  .btn-clear-action {
+    padding: 6px 2px;
+    font-size: 0.72rem;
   }
 }
 
@@ -2251,6 +2498,109 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.settings-grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.aria2-split-wrapper {
+  margin-left: 24px;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-update-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.settings-update-vers {
+  font-size: 0.83rem;
+}
+
+.settings-update-btns {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cookie-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kone-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kone-watermark-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.kone-watermark-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.api-token-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.api-token-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.code-preview-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.code-preview-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.code-preview-row button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 

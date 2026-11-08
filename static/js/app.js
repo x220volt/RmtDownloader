@@ -611,13 +611,19 @@ function createJobCard(job) {
         ${job.is_auto ? `<span class="job-mode-tag auto" title="자동 수집(감시) 다운로드">🤖 자동</span>` : `<span class="job-mode-tag manual" title="사용자 수동 추가 다운로드">👤 수동</span>`}
         ${isCloud && job.file_path ? `<span class="job-folder-tag cloud" title="저장 위치: ${escapeHtml(job.file_path)}">☁️ ${escapeHtml(job.file_path)}</span>` : ''}
         ${!isCloud && subfolderName ? `<span class="job-folder-tag" title="저장 폴더: ${escapeHtml(subfolderName)}">📁 ${escapeHtml(subfolderName)}</span>` : ''}
-        ${displaySource ? `<span class="job-source-tag" title="출처: ${escapeHtml(displaySource)}">${sourceHref ? `<a href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">📝 ${escapeHtml(displaySource)} ↗</a>` : `📝 ${escapeHtml(displaySource)}`}</span>` : ''}
       </div>
       <div class="job-actions">
         ${isCloud && job.status === 'completed' ? `<a href="https://www.terabox.com/main" target="_blank" rel="noopener noreferrer" class="cloud-open-btn" title="테라박스 웹 드라이브 열기">☁️ 테라박스 ↗</a>` : ''}
         ${renderActionButtons(job)}
       </div>
     </div>
+    ${displaySource ? `
+      <div class="job-source-row">
+        <span class="job-source-tag" title="출처: ${escapeHtml(displaySource)}">
+          ${sourceHref ? `<a href="${escapeHtml(sourceHref)}" target="_blank" rel="noopener noreferrer">📝 ${escapeHtml(displaySource)} ↗</a>` : `📝 ${escapeHtml(displaySource)}`}
+        </span>
+      </div>
+    ` : ''}
 
     <div class="job-title-row">
       <span class="job-filename" title="${escapeHtml(job.filename)}">${escapeHtml(job.filename)}</span>
