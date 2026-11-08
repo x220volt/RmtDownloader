@@ -61,6 +61,8 @@ from auth import (
 from config import (
     APP_VERSION,
     APP_VERSION_TAG,
+    CONFIG_DIR,
+    TORRENTS_DIR,
     generate_api_token,
     get_local_ip_addresses,
     get_or_create_api_token,
@@ -107,8 +109,6 @@ class _IgnorePollingLogFilter(logging.Filter):
 
 logging.getLogger("werkzeug").addFilter(_IgnorePollingLogFilter())
 
-
-from config import TORRENTS_DIR
 
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 

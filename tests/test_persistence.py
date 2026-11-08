@@ -213,6 +213,26 @@ class TestJobPersistence(unittest.TestCase):
             loaded = config.load_settings()
             self.assertEqual(loaded["download_dir"], "/downloads")
 
+    def test_ensure_single_instance_linux_docker(self):
+        """Linux/Docker 환경(sys.platform == 'linux')에서 ensure_single_instance() 실행 시 NameError(CONFIG_DIR)가 발생하지 않는지 검증."""
+        import sys
+        from unittest.mock import MagicMock, patch
+        import app
+
+        mock_fcntl = MagicMock()
+        mock_config_dir = MagicMock()
+        mock_config_dir.exists.return_value = True
+        mock_config_dir.__truediv__.return_value = Path(self.temp_dir) / ".remote_downloader.lock"
+
+        with (
+            patch.object(sys, "platform", "linux"),
+            patch.dict("sys.modules", {"fcntl": mock_fcntl}),
+            patch("builtins.open", unittest.mock.mock_open()),
+            patch.object(app, "CONFIG_DIR", mock_config_dir),
+        ):
+            app.ensure_single_instance()
+            self.assertIsNotNone(app._single_instance_lock)
+
 
 if __name__ == "__main__":
     unittest.main()
