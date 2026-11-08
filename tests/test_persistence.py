@@ -193,6 +193,26 @@ class TestJobPersistence(unittest.TestCase):
             self.assertEqual(len(dm_restarted2.get_all_jobs()), 0)
             dm_restarted2.stop()
 
+    def test_load_settings_linux_windows_path_conversion(self):
+        """Linux/Docker 환경(os.name != 'nt')에서 Windows 경로가 설정되어 있을 때 NameError 없이 자동 보정되는지 검증."""
+        import config
+
+        dummy_settings = {
+            "download_dir": r"C:\Users\User\Downloads",
+            "host": "0.0.0.0",
+            "port": 7971,
+        }
+
+        with (
+            patch.object(config, "os") as mock_os,
+            patch("builtins.open", unittest.mock.mock_open(read_data='{"download_dir": "C:\\\\Users\\\\User\\\\Downloads"}')),
+            patch.object(config.Path, "exists", return_value=True),
+        ):
+            mock_os.name = "posix"
+            mock_os.environ.get.side_effect = lambda k, default=None: "/downloads" if k == "DOWNLOAD_DIR" else default
+            loaded = config.load_settings()
+            self.assertEqual(loaded["download_dir"], "/downloads")
+
 
 if __name__ == "__main__":
     unittest.main()
