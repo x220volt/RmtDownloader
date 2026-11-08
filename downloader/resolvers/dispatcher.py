@@ -49,6 +49,16 @@ class ResolverDispatcher:
         if not resolver:
             raise ValueError(f"지원하지 않는 다운로드 링크 형태입니다: {url}")
         target_url = cleaned_url if resolver.can_handle(cleaned_url) else url
+        if not resolver.can_handle(target_url):
+            from ..url_helper import is_shortened_url, unshorten_url
+
+            if is_shortened_url(target_url):
+                try:
+                    expanded = unshorten_url(target_url)
+                    if expanded and resolver.can_handle(expanded):
+                        target_url = expanded
+                except Exception:
+                    pass
         logger.info(f"[{resolver.name}] 리졸버를 사용하여 링크 분석 시작: {target_url}")
         result = resolver.resolve(target_url, options=options)
         logger.info(

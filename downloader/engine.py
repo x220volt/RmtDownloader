@@ -665,7 +665,10 @@ class DownloadTask:
             with _FINALIZE_LOCK:
                 unique_name = get_unique_filename(self.dest_dir, dest_filename)
                 final_target_path = os.path.join(self.dest_dir, unique_name)
-                os.replace(part_path, final_target_path)
+                if os.path.exists(part_path):
+                    os.replace(part_path, final_target_path)
+                elif not os.path.exists(final_target_path):
+                    open(final_target_path, "ab").close()
             self.final_file_path = final_target_path
             self.filename = unique_name
 

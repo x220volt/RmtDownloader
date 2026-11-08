@@ -49,38 +49,45 @@ def bdecode(data: bytes):
 
 def parse_torrent_file(torrent_path: str) -> dict:
     """.torrent 파일을 읽어 파일명 및 총 용량 정보를 추출합니다."""
-    with open(torrent_path, "rb") as f:
-        data = f.read()
+    try:
+        with open(torrent_path, "rb") as f:
+            data = f.read()
 
-    decoded = bdecode(data)
-    info = decoded.get(b"info", {}) if isinstance(decoded, dict) else {}
-    if not isinstance(info, dict):
-        info = {}
+        decoded = bdecode(data)
+        info = decoded.get(b"info", {}) if isinstance(decoded, dict) else {}
+        if not isinstance(info, dict):
+            info = {}
 
-    name = ""
-    for k in (b"name.utf-8", b"name"):
-        if k in info:
-            val = info[k]
-            for enc in ("utf-8", "cp949", "euc-kr", "latin-1"):
-                try:
-                    name = val.decode(enc)
+        name = ""
+        for k in (b"name.utf-8", b"name"):
+            if k in info:
+                val = info[k]
+                for enc in ("utf-8", "cp949", "euc-kr", "latin-1"):
+                    try:
+                        name = val.decode(enc)
+                        break
+                    except Exception:
+                        pass
+                if name:
                     break
-                except Exception:
-                    pass
-            if name:
-                break
 
-    total_size = 0
-    if b"files" in info:
-        for fi in info[b"files"]:
-            total_size += fi.get(b"length", 0)
-    else:
-        total_size = info.get(b"length", 0)
+        total_size = 0
+        if b"files" in info:
+            for fi in info[b"files"]:
+                total_size += fi.get(b"length", 0)
+        else:
+            total_size = info.get(b"length", 0)
 
-    return {
-        "name": name or os.path.basename(torrent_path),
-        "total_size": total_size,
-    }
+        return {
+            "name": name or os.path.basename(torrent_path),
+            "total_size": total_size,
+        }
+    except Exception as e:
+        logger.warning(f"토렌트 메타데이터 파싱 예외 발생({torrent_path}): {e}")
+        return {
+            "name": os.path.basename(torrent_path),
+            "total_size": 0,
+        }
 
 
 def parse_bytes_string(s: str) -> int:

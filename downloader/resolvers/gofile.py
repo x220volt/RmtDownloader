@@ -135,7 +135,8 @@ def _evaluate_hash_input(script: str) -> str:
                 f"process.stdout.write(__gofileHashInput);\n"
             )
             proc = subprocess.run(
-                [node_exe, "-e", js_code],
+                [node_exe, "-"],
+                input=js_code,
                 capture_output=True,
                 text=True,
                 timeout=10,

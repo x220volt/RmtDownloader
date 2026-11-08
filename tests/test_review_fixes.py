@@ -449,5 +449,77 @@ class AutoResumeAndRetryTests(unittest.TestCase):
             self.assertTrue(dm.retry_job(job.id))
             self.assertEqual(job.retry_count, 0)
 
+    def test_dispatcher_unshorten_propagation(self):
+        """단축 URL이 서비스 직링크로 전개될 때 resolver에 전개된 target_url이 전달되는지 검증."""
+        from downloader.resolvers.dispatcher import ResolverDispatcher
+        from downloader.resolvers.base import BaseResolver
+
+        class MockServiceResolver(BaseResolver):
+            name = "MockService"
+            def can_handle(self, url):
+                return "real-service.com" in url
+            def resolve(self, url, options=None):
+                return {"url": url, "filename": "target.bin"}
+
+        dispatcher = ResolverDispatcher(resolvers=[MockServiceResolver()])
+        short_url = "https://bit.ly/mock123"
+        expanded_url = "https://real-service.com/download/file.bin"
+
+        with patch("downloader.url_helper.unshorten_url", return_value=expanded_url):
+            res = dispatcher.resolve(short_url)
+            self.assertEqual(res["url"], expanded_url)
+            self.assertEqual(res["filename"], "target.bin")
+
+    def test_manager_jobs_truncation_preserves_active(self):
+        """jobs.json 저장 시 최대 보관 개수를 초과해도 활성(downloading, queued) 작업은 제거되지 않는지 검증."""
+        from downloader.manager import DownloadManager, DownloadJob, MAX_JOBS_ENTRIES
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dm = DownloadManager(
+                settings_getter=lambda: {"download_dir": tmp_dir},
+                jobs_file=Path(tmp_dir) / "jobs.json",
+            )
+            dm._stop_event.set()
+
+            # 10개의 완료된 작업과 1개의 활성 다운로드 작업 추가
+            for i in range(10):
+                j = DownloadJob(f"https://example.com/done_{i}", tmp_dir)
+                j.id = f"done_{i}"
+                j.status = "completed"
+                dm.jobs[j.id] = j
+
+            active_job = DownloadJob("https://example.com/active", tmp_dir)
+            active_job.id = "active_job_1"
+            active_job.status = "downloading"
+            dm.jobs[active_job.id] = active_job
+
+            # MAX_JOBS_ENTRIES를 5로 임시 모의하여 저장 호출
+            with patch("downloader.manager.MAX_JOBS_ENTRIES", 5):
+                dm._save_jobs()
+
+            self.assertIn("active_job_1", dm.jobs)
+            self.assertEqual(dm.jobs["active_job_1"].status, "downloading")
+            self.assertLessEqual(len(dm.jobs), 5)
+            dm.stop()
+            if (Path(tmp_dir) / "jobs.json").exists():
+                (Path(tmp_dir) / "jobs.json").unlink()
+
+    def test_parse_torrent_corrupt_file_safe(self):
+        """손상되거나 비어있는 .torrent 파일도 예외 없이 안전한 기본값을 반환하는지 검증."""
+        from downloader.torrent_engine import parse_torrent_file
+
+        with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as f:
+            f.write(b"NOT_A_VALID_BENCODE_DATA_GARBAGE")
+            f_path = f.name
+
+        try:
+            info = parse_torrent_file(f_path)
+            self.assertIn("name", info)
+            self.assertEqual(info["total_size"], 0)
+        finally:
+            import os
+            if os.path.exists(f_path):
+                os.remove(f_path)
+
 if __name__ == "__main__":
     unittest.main()

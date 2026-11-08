@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.53"
+APP_VERSION = "0.1.54"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
 _env_config = os.environ.get("CONFIG_DIR")
@@ -230,6 +230,7 @@ def save_settings(new_settings):
             logging.getLogger(__name__).warning("다운로드 디렉터리 생성 실패: %s", e)
         temp_path = None
         try:
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",

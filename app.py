@@ -333,7 +333,12 @@ def get_storage_info(download_dir: str | None = None, force_refresh: bool = Fals
     file_count = 0
     try:
         if os.path.exists(target_dir):
+            base_depth = target_dir.rstrip(os.sep).count(os.sep)
             for root, dirs, files in os.walk(target_dir):
+                # NAS 등 대용량 스토리지 탐색 시 성능 저하 및 행(hang) 방지 (최대 5레벨, 50,000개 파일)
+                depth = root.count(os.sep) - base_depth
+                if depth >= 5:
+                    dirs.clear()
                 for f in files:
                     fp = os.path.join(root, f)
                     try:
@@ -341,6 +346,8 @@ def get_storage_info(download_dir: str | None = None, force_refresh: bool = Fals
                         file_count += 1
                     except OSError:
                         pass
+                if file_count >= 50000:
+                    break
     except Exception as e:
         logger.warning(f"저장 폴더 크기 확인 실패 ({target_dir}): {e}")
 
@@ -810,7 +817,7 @@ def events():
                 except queue.Empty:
                     # 연결 유지를 위한 하트비트 ping
                     yield f": ping {time.time()}\n\n"
-        except GeneratorExit:
+        except (GeneratorExit, ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
             download_manager.unsubscribe(client_queue)
@@ -1003,7 +1010,11 @@ def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
                 )
 
             dest_path = (target_dir / info.filename).resolve()
-            if not str(dest_path).startswith(str(target_dir)):
+            try:
+                is_safe_path = dest_path.is_relative_to(target_dir)
+            except AttributeError:
+                is_safe_path = str(dest_path).startswith(str(target_dir) + os.sep) or dest_path == target_dir
+            if not is_safe_path:
                 raise ValueError(
                     "보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다."
                 )
@@ -1805,15 +1816,22 @@ def ensure_single_instance():
     else:
         import fcntl
 
-        lock_dir = CONFIG_DIR if CONFIG_DIR.exists() else Path.home()
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            lock_dir = CONFIG_DIR
+        except Exception:
+            lock_dir = Path.home()
         lock_path = lock_dir / ".remote_downloader.lock"
         try:
             f = open(lock_path, "w")
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             _single_instance_lock = f
-        except (BlockingIOError, OSError):
-            print("\n⚠️ [경고] 원격 다운로더가 이미 실행 중입니다. 중복 프로세스를 종료합니다.\n")
-            sys.exit(1)
+        except (BlockingIOError, OSError) as lock_err:
+            if isinstance(lock_err, BlockingIOError) or getattr(lock_err, "errno", None) in (11, 35):
+                print("\n⚠️ [경고] 원격 다운로더가 이미 실행 중입니다. 중복 프로세스를 종료합니다.\n")
+                sys.exit(1)
+            else:
+                logging.getLogger(__name__).warning("싱글 인스턴스 파일 락 획득 실패 (무시됨): %s", lock_err)
 
 
 if __name__ == "__main__":

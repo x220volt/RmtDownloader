@@ -488,8 +488,18 @@ class DownloadManager:
             return
         with self._lock:
             if len(self.jobs) > MAX_JOBS_ENTRIES:
-                keys_to_keep = list(self.jobs.keys())[-MAX_JOBS_ENTRIES:]
-                self.jobs = {k: self.jobs[k] for k in keys_to_keep}
+                active_keys = {
+                    k
+                    for k, j in self.jobs.items()
+                    if j.status in ("downloading", "resolving", "queued", "paused")
+                }
+                droppable_keys = [
+                    k for k in self.jobs.keys() if k not in active_keys
+                ]
+                num_to_drop = len(self.jobs) - MAX_JOBS_ENTRIES
+                if num_to_drop > 0:
+                    drop_set = set(droppable_keys[:num_to_drop])
+                    self.jobs = {k: v for k, v in self.jobs.items() if k not in drop_set}
 
             jobs_data = []
             for job in self.jobs.values():
@@ -1017,7 +1027,11 @@ class DownloadManager:
                     job.original_url, options=resolve_opts
                 )
                 with self._lock:
-                    if self.jobs.get(job_id) is not job or job.status != "resolving":
+                    if (
+                        self._stop_event.is_set()
+                        or self.jobs.get(job_id) is not job
+                        or job.status != "resolving"
+                    ):
                         job.thread = None
                         self.queue.task_done()
                         continue
@@ -1126,7 +1140,11 @@ class DownloadManager:
                         ).start()
 
                 with self._lock:
-                    if self.jobs.get(job_id) is not job or job.status != "resolving":
+                    if (
+                        self._stop_event.is_set()
+                        or self.jobs.get(job_id) is not job
+                        or job.status != "resolving"
+                    ):
                         job.thread = None
                         self.queue.task_done()
                         continue

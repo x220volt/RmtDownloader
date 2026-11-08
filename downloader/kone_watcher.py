@@ -190,6 +190,7 @@ class KoneWatcher:
             posts_list = list(self._seen_posts.keys())
             temp_path = None
             try:
+                SEEN_POSTS_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with tempfile.NamedTemporaryFile(
                     mode="w",
                     encoding="utf-8",
