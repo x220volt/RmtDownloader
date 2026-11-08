@@ -1,4 +1,4 @@
-# 🚀 원격 다운로더 (Remote Downloader) `v0.1.52`
+# 🚀 원격 다운로더 (Remote Downloader) `v0.1.53`
 
 스마트폰(iPhone / Android)이나 다른 PC의 웹 브라우저에서 링크·마그넷·Base64 코드를 전송하면, 서버 PC에서 해당 파일을 자동으로 해석·다운로드해 주는 파이썬 기반 원격 다운로드 센터입니다.
 

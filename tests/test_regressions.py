@@ -456,6 +456,94 @@ class ResolverLifecycleTests(unittest.TestCase):
             resolved["url"], "https://x-share.net/api/download/fileX?key=singlekey"
         )
 
+    def test_xshare_turnstile_drission_multilingual(self):
+        """영어 로케일(Docker/NAS 환경: 'Download') 환경에서도 Turnstile 완료 후 정상 다운로드 key를 추출해야 함."""
+        from downloader.resolvers.xshare import _resolve_xshare_via_drission
+
+        mock_page = MagicMock()
+        mock_btn = MagicMock()
+        mock_btn.attr.return_value = None
+        mock_btn_text = MagicMock()
+        mock_btn_text.text = "Download"
+
+        def mock_ele(selector, timeout=None):
+            if selector == "#dl-btn":
+                return mock_btn
+            if selector == "#dl-btn-text":
+                return mock_btn_text
+            return None
+
+        mock_page.ele.side_effect = mock_ele
+        mock_page.run_js.side_effect = [
+            "mock_turnstile_token_123",
+            {
+                "ok": True,
+                "status": 200,
+                "data": {"key": "bypass_key_abc"},
+                "filename": "english_locale.zip",
+            },
+        ]
+
+        with patch("downloader.resolvers.xshare.stealth_browser_session") as mock_sess:
+            mock_sess.return_value.__enter__.return_value = mock_page
+            with patch("time.sleep", return_value=None):
+                key, filename = _resolve_xshare_via_drission(
+                    "https://x-share.net/s/file123", timeout=3
+                )
+
+        self.assertEqual(key, "bypass_key_abc")
+        self.assertEqual(filename, "english_locale.zip")
+
+    def test_xshare_turnstile_flaresolverr(self):
+        """FlareSolverr 설정 시 x-share Turnstile 우회 및 다운로드 key 발급이 동작해야 함."""
+        from downloader.resolvers.xshare import XShareResolver
+
+        file_resp = Mock(status_code=200, ok=True)
+        file_resp.json.return_value = {
+            "id": "fileFS",
+            "name": "flaresolverr.zip",
+            "size": 100,
+        }
+
+        fail_token_resp = Mock(status_code=403, ok=False)
+        fs_resp = Mock(status_code=200, ok=True)
+        fs_resp.json.return_value = {
+            "status": "ok",
+            "solution": {
+                "response": '<html><body><input name="cf-turnstile-response" value="fs_cf_token_xyz" /></body></html>',
+                "cookies": [{"name": "cf_clearance", "value": "xyz"}],
+                "userAgent": "FlareSolverr-UA",
+            },
+        }
+
+        success_token_resp = Mock(status_code=200, ok=True)
+        success_token_resp.json.return_value = {"key": "flaresolverr_key_456"}
+
+        def mock_post(url, *args, **kwargs):
+            if "localhost:8191" in url:
+                return fs_resp
+            if "api/download-token" in url:
+                payload = kwargs.get("json", {})
+                if payload.get("turnstileToken") == "fs_cf_token_xyz":
+                    return success_token_resp
+                return fail_token_resp
+            return fail_token_resp
+
+        with (
+            patch("downloader.resolvers.xshare.requests.get", return_value=file_resp),
+            patch("downloader.resolvers.xshare.requests.post", side_effect=mock_post),
+        ):
+            resolver = XShareResolver()
+            res = resolver.resolve(
+                "https://x-share.net/s/fileFS",
+                options={"flaresolverr_url": "http://localhost:8191"},
+            )
+
+        self.assertEqual(
+            res["url"],
+            "https://x-share.net/api/download/fileFS?key=flaresolverr_key_456",
+        )
+
     def test_torrent_engine_helpers(self):
         import os
         import tempfile

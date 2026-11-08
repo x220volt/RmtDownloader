@@ -70,6 +70,7 @@ def stealth_browser_session(
     co.set_argument("--mute-audio")
     co.set_argument("--no-first-run")
     co.set_argument("--no-default-browser-check")
+    co.set_argument("--lang=ko-KR,ko,en-US,en")
     # Docker 및 Linux 컨테이너 환경 필수 호환 옵션
     co.set_argument("--no-sandbox")
     co.set_argument("--disable-dev-shm-usage")
