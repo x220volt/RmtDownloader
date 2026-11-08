@@ -9,42 +9,54 @@ from typing import Callable, Optional
 
 from .aria2_manager import get_aria2_path
 
+from .callbacks import safe_callback
+from .process_utils import reap_process
+
 logger = logging.getLogger(__name__)
 
 
 def bdecode(data: bytes):
-    """순수 파이썬 bencode 디코더."""
-
-    def decode_item(idx: int):
-        if idx >= len(data):
-            raise ValueError("Unexpected end of bencoded data")
-        b = data[idx : idx + 1]
-        if b == b"i":
-            end = data.index(b"e", idx)
-            return int(data[idx + 1 : end]), end + 1
-        elif b.isdigit():
-            colon = data.index(b":", idx)
-            length = int(data[idx:colon])
-            start = colon + 1
-            return data[start : start + length], start + length
-        elif b == b"l":
+    """Decode one complete bencoded value with bounds and nesting checks."""
+    def decode_item(idx, depth=0):
+        if depth > 128 or idx >= len(data):
+            raise ValueError("Truncated or excessively nested bencoded data")
+        token = data[idx:idx + 1]
+        if token == b"i":
+            end = data.find(b"e", idx + 1)
+            value = data[idx + 1:end] if end >= 0 else b""
+            if not re.fullmatch(rb"0|-?[1-9][0-9]*", value):
+                raise ValueError("Invalid bencoded integer")
+            return int(value), end + 1
+        if b"0" <= token <= b"9":
+            colon = data.find(b":", idx)
+            length = data[idx:colon] if colon >= 0 else b""
+            if not re.fullmatch(rb"0|[1-9][0-9]*", length):
+                raise ValueError("Invalid bencoded string length")
+            end = colon + 1 + int(length)
+            if end > len(data):
+                raise ValueError("Truncated bencoded string")
+            return data[colon + 1:end], end
+        if token in (b"l", b"d"):
             idx += 1
-            res = []
-            while data[idx : idx + 1] != b"e":
-                item, idx = decode_item(idx)
-                res.append(item)
-            return res, idx + 1
-        elif b == b"d":
-            idx += 1
-            res = {}
-            while data[idx : idx + 1] != b"e":
-                key, idx = decode_item(idx)
-                val, idx = decode_item(idx)
-                res[key] = val
-            return res, idx + 1
-        raise ValueError(f"Unknown bencode type byte: {b}")
+            result = [] if token == b"l" else {}
+            while idx < len(data) and data[idx:idx + 1] != b"e":
+                key, idx = decode_item(idx, depth + 1)
+                if token == b"l":
+                    result.append(key)
+                else:
+                    if not isinstance(key, bytes) or key in result:
+                        raise ValueError("Invalid or duplicate bencoded dictionary key")
+                    value, idx = decode_item(idx, depth + 1)
+                    result[key] = value
+            if idx >= len(data):
+                raise ValueError("Unterminated bencoded container")
+            return result, idx + 1
+        raise ValueError("Unknown bencode type")
 
-    return decode_item(0)[0]
+    result, end = decode_item(0)
+    if end != len(data):
+        raise ValueError("Trailing bencoded data")
+    return result
 
 
 def parse_torrent_file(torrent_path: str) -> dict:
@@ -190,7 +202,7 @@ class TorrentDownloadTask:
         self.dest_dir = dest_dir
         self.filename = filename or "Torrent Download"
         self.partial_id = partial_id
-        self.progress_callback = progress_callback
+        self.progress_callback = safe_callback(progress_callback)
 
         self._process: Optional[subprocess.Popen] = None
         self._is_stopped = False
@@ -252,7 +264,9 @@ class TorrentDownloadTask:
             "--split=16",
             "--console-log-level=notice",
             "--auto-file-renaming=false",
-            "--allow-overwrite=true",
+            "--allow-overwrite=false",
+            "--continue=true",
+            "--check-integrity=true",
             "--",
             self.source,
         ]
@@ -288,6 +302,7 @@ class TorrentDownloadTask:
             }
 
         if not self._process or not self._process.stdout:
+            reap_process(self._process)
             return {
                 "success": False,
                 "status": "failed",
@@ -357,29 +372,16 @@ class TorrentDownloadTask:
                         self._process.kill()
                     except Exception:
                         pass
-                ret = self._process.wait()
+                ret = self._process.wait(timeout=3)
         except Exception as e:
             logger.exception(f"토렌트 스트림 처리 중 오류: {e}")
-            if self._process and self._process.poll() is None:
-                try:
-                    self._process.terminate()
-                    self._process.wait(timeout=5)
-                except Exception:
-                    try:
-                        self._process.kill()
-                    except Exception:
-                        pass
             return {"success": False, "status": "failed", "error": str(e)}
         finally:
-            if self._process and self._process.poll() is None:
-                try:
-                    self._process.terminate()
-                    self._process.wait(timeout=3)
-                except Exception:
-                    try:
-                        self._process.kill()
-                    except Exception:
-                        pass
+            reap_process(self._process)
+            try:
+                proc_stdout.close()
+            except (AttributeError, OSError):
+                pass
 
         if self._is_stopped:
             if self._is_paused:
@@ -401,17 +403,13 @@ class TorrentDownloadTask:
 
         if ret == 0:
             final_path = os.path.join(self.dest_dir, self.filename)
-            # 만약 self.filename과 일치하지 않는 경우 dest_dir에서 최근 수정된 파일/폴더 확인
-            if not os.path.exists(final_path):
-                entries = [
-                    os.path.join(self.dest_dir, x)
-                    for x in os.listdir(self.dest_dir)
-                    if not x.endswith(".aria2")
-                ]
-                if entries:
-                    latest = max(entries, key=os.path.getmtime)
-                    final_path = latest
-                    self.filename = os.path.basename(latest)
+            destination = os.path.realpath(self.dest_dir)
+            resolved = os.path.realpath(final_path)
+            if (os.path.commonpath([destination, resolved]) != destination
+                    or resolved == destination or not os.path.exists(resolved)):
+                return {"success": False, "status": "failed",
+                        "error": "Torrent completed without a verified output path"}
+            final_path = resolved
 
             if self.progress_callback:
                 self.progress_callback(

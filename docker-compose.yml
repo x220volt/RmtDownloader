@@ -28,4 +28,10 @@ services:
       - ./downloads:/downloads
     # Cloudflare 우회 및 웹페이지 캡처용 브라우저 메모리 확보 (512MB 권장)
     shm_size: "512mb"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7971/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 

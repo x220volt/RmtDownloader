@@ -6,11 +6,15 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 from typing import Any, Callable, Mapping, Optional
 
 from .aria2_manager import get_aria2_path
 from .engine import DEFAULT_USER_AGENT, _FINALIZE_LOCK, get_unique_filename, sanitize_filename
 from .torrent_engine import parse_aria2_summary_line
+
+from .callbacks import safe_callback
+from .process_utils import reap_process
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +39,14 @@ class Aria2HttpDownloadTask:
         self.dest_dir = dest_dir
         self.filename = sanitize_filename(filename) if filename else ""
         self.partial_id = re.sub(r"[^a-zA-Z0-9_-]", "", partial_id)
-        self._work_dir = (
-            os.path.join(dest_dir, f".aria2-{self.partial_id}")
-            if self.partial_id else dest_dir
-        )
+        self._work_id = self.partial_id or uuid.uuid4().hex
+        self._work_dir = os.path.join(dest_dir, f".aria2-{self._work_id}")
         self.headers = dict(headers or {})
         self.cookies = cookies or ""
         self.referer = referer or ""
         self.split = max(1, min(16, int(split)))
-        self.progress_callback = progress_callback
-        self.status_callback = status_callback
+        self.progress_callback = safe_callback(progress_callback)
+        self.status_callback = safe_callback(status_callback)
 
         self._process: Optional[subprocess.Popen] = None
         self._is_stopped = False
@@ -73,16 +75,8 @@ class Aria2HttpDownloadTask:
                     self._process.terminate()
                 except Exception:
                     pass
-        # 취소 시 불완전 파일 및 .aria2 제어 파일 정리
-        if self.filename and not self.final_file_path:
-            target = os.path.join(self._work_dir, self.filename)
-            aria2_ctrl = target + ".aria2"
-            for fpath in (target, aria2_ctrl):
-                if os.path.exists(fpath):
-                    try:
-                        os.remove(fpath)
-                    except Exception:
-                        pass
+        # The run thread cleans private files after reaping the process.
+        # Deleting while aria2 still writes can corrupt resumable state.
 
     @staticmethod
     def cleanup_partial(dest_dir: str, partial_id: str):
@@ -197,6 +191,7 @@ class Aria2HttpDownloadTask:
             }
 
         if not self._process or not self._process.stdout:
+            reap_process(self._process)
             return {
                 "success": False,
                 "status": "failed",
@@ -281,29 +276,16 @@ class Aria2HttpDownloadTask:
                         self._process.kill()
                     except Exception:
                         pass
-                ret = self._process.wait()
+                ret = self._process.wait(timeout=3)
         except Exception as e:
             logger.exception(f"[Aria2HTTP] 스트림 처리 중 오류: {e}")
-            if self._process and self._process.poll() is None:
-                try:
-                    self._process.terminate()
-                    self._process.wait(timeout=5)
-                except Exception:
-                    try:
-                        self._process.kill()
-                    except Exception:
-                        pass
             return {"success": False, "status": "failed", "error": str(e)}
         finally:
-            if self._process and self._process.poll() is None:
-                try:
-                    self._process.terminate()
-                    self._process.wait(timeout=3)
-                except Exception:
-                    try:
-                        self._process.kill()
-                    except Exception:
-                        pass
+            reap_process(self._process)
+            try:
+                proc_stdout.close()
+            except (AttributeError, OSError):
+                pass
 
         if self._is_stopped:
             if self._is_paused:
@@ -317,8 +299,10 @@ class Aria2HttpDownloadTask:
                 }
             else:
                 logger.info(f"[Aria2HTTP] 다운로드 취소됨: {self.filename}")
-                if self.partial_id:
-                    self.cleanup_partial(self.dest_dir, self.partial_id)
+                try:
+                    self.cleanup_partial(self.dest_dir, self._work_id)
+                except OSError as error:
+                    logger.warning("aria2 cancellation cleanup failed: %s", error)
                 return {
                     "success": False,
                     "status": "cancelled",
@@ -329,37 +313,35 @@ class Aria2HttpDownloadTask:
             final_path = (
                 os.path.join(self._work_dir, self.filename) if self.filename else ""
             )
-            # 파일명이 지정되지 않았거나 aria2c가 Content-Disposition/리다이렉션으로 다른 이름으로 저장한 경우 탐색
+            # Only a single completed output in this private directory is
+            # unambiguous. A control file means the corresponding file is partial.
             if not final_path or not os.path.isfile(final_path):
-                if (self.partial_id or not self.filename) and os.path.isdir(self._work_dir):
-                    candidates = [
-                        os.path.join(self._work_dir, f)
-                        for f in os.listdir(self._work_dir)
-                        if not f.endswith(".aria2")
-                        and os.path.isfile(os.path.join(self._work_dir, f))
-                    ]
-                    if candidates:
-                        latest = max(candidates, key=os.path.getmtime)
-                        final_path = latest
-                        self.filename = sanitize_filename(os.path.basename(latest))
-                        logger.info(f"[Aria2HTTP] 완료 파일 자동 매칭: {self.filename}")
+                candidates = [
+                    entry.path for entry in os.scandir(self._work_dir)
+                    if entry.is_file(follow_symlinks=False)
+                    and not entry.name.endswith(".aria2")
+                    and not os.path.exists(entry.path + ".aria2")
+                ]
+                if len(candidates) == 1:
+                    final_path = candidates[0]
+                    self.filename = sanitize_filename(os.path.basename(final_path))
 
-            if not self.filename or not os.path.isfile(final_path):
+            if not self.filename or not os.path.isfile(final_path) or os.path.exists(final_path + ".aria2"):
                 return {
                     "success": False,
                     "status": "failed",
                     "error": "aria2c completed without the expected output file",
                 }
-            if self.partial_id:
-                with _FINALIZE_LOCK:
-                    self.filename = get_unique_filename(self.dest_dir, self.filename)
-                    target = os.path.join(self.dest_dir, self.filename)
-                    os.replace(final_path, target)
-                    final_path = target
-                try:
-                    os.rmdir(self._work_dir)
-                except OSError:
-                    pass
+            with _FINALIZE_LOCK:
+                self.filename = get_unique_filename(self.dest_dir, self.filename)
+                target = os.path.join(self.dest_dir, self.filename)
+                os.replace(final_path, target)
+                final_path = target
+            try:
+                os.rmdir(self._work_dir)
+            except OSError:
+                pass
+            last_tot_bytes = os.path.getsize(final_path)
 
             self.final_file_path = final_path
             if self.progress_callback:

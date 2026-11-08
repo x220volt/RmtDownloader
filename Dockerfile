@@ -59,5 +59,9 @@ RUN chmod +x /app/docker-entrypoint.sh \
 VOLUME ["/config", "/downloads"]
 EXPOSE 7971
 
+# 컨테이너 상태 모니터링 (30초 주기 비인증 헬스체크)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:7971/api/health || exit 1
+
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 

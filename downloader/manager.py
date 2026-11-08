@@ -1,7 +1,7 @@
 import atexit
-import glob
 import json
 import logging
+import math
 import os
 import queue
 import tempfile
@@ -173,6 +173,25 @@ class DownloadJob:
     @classmethod
     def from_storage_dict(cls, data: dict) -> "DownloadJob":
         """디스크 저장 데이터로부터 DownloadJob 인스턴스를 복원합니다."""
+        for key in ("id", "original_url", "download_dir"):
+            if not isinstance(data.get(key), str) or not data[key].strip():
+                raise ValueError(f"Invalid stored job {key}")
+        if data.get("options") is not None and not isinstance(data["options"], dict):
+            raise ValueError("Invalid stored job options")
+        for key in ("downloaded_bytes", "retry_count", "max_retries", "total_bytes"):
+            value = data.get(key)
+            if value is not None and (type(value) is not int or value < 0):
+                raise ValueError(f"Invalid stored job {key}")
+        progress = data.get("progress", 0.0)
+        if type(progress) not in (int, float) or not math.isfinite(progress) or not 0 <= progress <= 100:
+            raise ValueError("Invalid stored job progress")
+        if data.get("status", "queued") not in {
+            "queued", "resolving", "downloading", "paused", "completed", "failed", "cancelled"
+        }:
+            raise ValueError("Invalid stored job status")
+        for key in ("service_name", "filename", "file_path", "error_message", "referer", "source_title", "source_url"):
+            if key in data and not isinstance(data[key], str):
+                raise ValueError(f"Invalid stored job {key}")
         job = cls(
             url=data.get("original_url", ""),
             download_dir=data.get("download_dir", ""),
@@ -322,6 +341,7 @@ class DownloadManager:
                     with open(HISTORY_FILE, encoding="utf-8") as f:
                         data = json.load(f)
                     if isinstance(data, dict):
+                        data = {key: value for key, value in data.items() if isinstance(value, dict)}
                         for v in data.values():
                             if isinstance(v, dict):
                                 if "is_auto" not in v:
@@ -536,7 +556,7 @@ class DownloadManager:
             for job in self.jobs.values():
                 if job.status in ("downloading", "resolving") and job.task:
                     try:
-                        job.task.stop()
+                        job.task.pause()
                     except Exception:
                         pass
             self._save_jobs()
@@ -833,11 +853,6 @@ class DownloadManager:
                         return full_p
         except OSError:
             pass
-        # 2. filename 기반 part 파일 탐색
-        if job.filename:
-            direct_part = os.path.join(job.download_dir, f"{job.filename}.part")
-            if os.path.isfile(direct_part):
-                return direct_part
         return None
 
     def _cleanup_part_file(self, job: DownloadJob):
@@ -1242,7 +1257,7 @@ class DownloadManager:
                     return
                 had_error = False
                 with self._lock:
-                    if self.jobs.get(job_id) is not job or job.status != "downloading":
+                    if self._stop_event.is_set() or self.jobs.get(job_id) is not job or job.status != "downloading":
                         return
                     if job.error_message:
                         job.error_message = ""
@@ -1350,7 +1365,7 @@ class DownloadManager:
                                 status_callback=on_status,
                             )
                 with self._lock:
-                    if self.jobs.get(job_id) is not job or job.status != "downloading":
+                    if self._stop_event.is_set() or self.jobs.get(job_id) is not job or job.status != "downloading":
                         job.thread = None
                         self.queue.task_done()
                         continue
@@ -1429,6 +1444,7 @@ class DownloadManager:
                                 job.status = "queued"
                                 job.task = None
                                 job.thread = None
+                                self._save_jobs()
                                 self._broadcast("job_updated", job.to_dict())
                                 self.queue.put(job.id)
                             self.queue.task_done()
@@ -1461,6 +1477,9 @@ class DownloadManager:
                 if job.task and getattr(job.task, "filename", ""):
                     job.filename = job.task.filename
                 final_status = result.get("status")
+                # A late transfer error must not undo an explicit pause.
+                if job.status == "paused" and final_status != "completed":
+                    final_status = "paused"
                 if final_status == "completed":
                     job.status = "completed"
                     job.filename = str(result.get("filename") or job.filename)
@@ -1526,6 +1545,7 @@ class DownloadManager:
 
                         job.task = None
                         job.thread = None
+                        self._save_jobs()
                         self._broadcast("job_updated", job.to_dict())
 
                         def _requeue_timer(j_id):

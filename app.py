@@ -1,5 +1,6 @@
 """원격 다운로더 (Remote Downloader) Flask 웹 서버 메인 애플리케이션."""
 
+import atexit
 import io
 import json
 import logging
@@ -7,8 +8,10 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from datetime import timedelta
@@ -97,6 +100,7 @@ class _IgnorePollingLogFilter(logging.Filter):
                         "/api/status",
                         "/api/kone/status",
                         "/api/events",
+                        "/api/health",
                     )
                 )
                 and " 200 " in msg
@@ -379,6 +383,21 @@ def server_storage():
     return jsonify(info)
 
 
+@app.route("/api/health", methods=["GET"])
+def healthcheck():
+    """도커 헬스체크 및 외부 모니터링용 비인증 상태 확인 엔드포인트."""
+    return (
+        jsonify(
+            {
+                "status": "healthy",
+                "version": APP_VERSION,
+                "version_tag": APP_VERSION_TAG,
+            }
+        ),
+        200,
+    )
+
+
 @app.route("/api/info", methods=["GET"])
 @login_required
 def get_info():
@@ -539,9 +558,18 @@ def upload_torrent():
     torrents_dir = TORRENTS_DIR
     torrents_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_name = re.sub(r'[\\/*?:"<>|]', "_", filename)
-    saved_path = torrents_dir / f"{int(time.time())}_{safe_name}"
-    uploaded.save(str(saved_path))
+    # Exclusive creation prevents same-second uploads from overwriting the
+    # torrent metadata already used by another queued job.
+    with tempfile.NamedTemporaryFile(
+        dir=torrents_dir, prefix="upload-", suffix=".torrent", delete=False
+    ) as cached:
+        saved_path = Path(cached.name)
+        try:
+            uploaded.save(cached)
+        except Exception:
+            cached.close()
+            saved_path.unlink(missing_ok=True)
+            raise
 
     try:
         from downloader.torrent_engine import parse_torrent_file
@@ -563,6 +591,7 @@ def upload_torrent():
             }
         )
     else:
+        saved_path.unlink(missing_ok=True)
         return jsonify(
             {"success": False, "error": "중복 링크이거나 작업 등록에 실패했습니다."}
         ), 400
@@ -1832,6 +1861,32 @@ def ensure_single_instance():
                 sys.exit(1)
             else:
                 logging.getLogger(__name__).warning("싱글 인스턴스 파일 락 획득 실패 (무시됨): %s", lock_err)
+
+
+def shutdown_server():
+    """서버 종료 시 백그라운드 워커 및 상태를 안전하게 저장하고 정리합니다."""
+    logger.info("원격 다운로더 서버를 정상 종료합니다...")
+    try:
+        kone_watcher.stop()
+    except Exception:
+        pass
+    try:
+        download_manager.stop()
+    except Exception:
+        pass
+
+
+def _sigterm_handler(signum, frame):
+    logger.info("종료 신호(signal %s) 수신, 안전하게 종료합니다.", signum)
+    shutdown_server()
+    sys.exit(0)
+
+
+atexit.register(shutdown_server)
+try:
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+except Exception:
+    pass
 
 
 if __name__ == "__main__":

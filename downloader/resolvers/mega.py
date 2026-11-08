@@ -21,6 +21,8 @@ from ..engine import (
 )
 from .base import BaseResolver
 
+from ..callbacks import safe_callback
+
 logger = logging.getLogger(__name__)
 
 MEGA_API_URL = "https://g.api.mega.co.nz/cs"
@@ -92,7 +94,7 @@ class MegaDownloadTask:
         self.key_a32 = key_a32
         self.file_size = file_size
         self.chunk_size = chunk_size
-        self.progress_callback = progress_callback
+        self.progress_callback = safe_callback(progress_callback)
 
         self._is_paused = False
         self._is_stopped = False

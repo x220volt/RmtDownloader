@@ -63,10 +63,6 @@ class Aria2HttpEngineTests(unittest.TestCase):
         mock_proc.wait.return_value = 0
         mock_popen.return_value = mock_proc
 
-        target_file = os.path.join(self.temp_dir, "test.zip")
-        with open(target_file, "wb") as f:
-            f.write(b"0" * 1024)
-
         task = Aria2HttpDownloadTask(
             url="https://example.com/test.zip",
             dest_dir=self.temp_dir,
@@ -77,6 +73,10 @@ class Aria2HttpEngineTests(unittest.TestCase):
             split=8,
             progress_callback=on_progress,
         )
+
+        os.makedirs(task._work_dir, exist_ok=True)
+        with open(os.path.join(task._work_dir, "test.zip"), "wb") as output:
+            output.write(b"0" * 1024)
 
         res = task.run()
 

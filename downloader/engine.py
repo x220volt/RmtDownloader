@@ -12,6 +12,8 @@ from urllib.parse import unquote, urlparse
 
 import requests
 
+from .callbacks import safe_callback
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = (
@@ -190,6 +192,20 @@ def _parse_content_range(header_val: str):
     return start_val, end_val, total_val
 
 
+def _validate_file_response(response, url):
+    """Validate every response, including replacements after a range failure."""
+    if response.status_code not in (200, 206):
+        raise ValueError(f"Unexpected download response: HTTP {response.status_code}")
+    length = response.headers.get("Content-Length")
+    if length is not None and not str(length).isdigit():
+        raise ValueError("Invalid download Content-Length")
+    content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    explicit_html = urlparse(url).path.lower().endswith((".html", ".htm"))
+    if content_type in ("text/html", "application/xhtml+xml") and not explicit_html:
+        raise ValueError("다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.")
+    return content_type, explicit_html
+
+
 class DownloadTask:
     """단일 다운로드를 수행하고 실시간 이벤트를 콜백으로 전달하는 태스크."""
 
@@ -218,8 +234,8 @@ class DownloadTask:
         self.cookies = cookies or ""
         self.referer = referer or ""
         self.chunk_size = chunk_size
-        self.progress_callback = progress_callback
-        self.status_callback = status_callback
+        self.progress_callback = safe_callback(progress_callback)
+        self.status_callback = safe_callback(status_callback)
         self.method = (method or "GET").upper()
         self.post_data = post_data
         self.max_retries = max(0, int(max_retries))
@@ -231,6 +247,7 @@ class DownloadTask:
 
     def stop(self):
         """다운로드를 중지/취소합니다."""
+        self._is_paused = False
         self._is_stopped = True
 
     def pause(self):
@@ -259,7 +276,7 @@ class DownloadTask:
 
         # 1. 요청 세션 및 재개할 임시 파일 확인
         session = requests.Session()
-        session.headers.update(req_headers)
+        session.headers.update({k: v for k, v in req_headers.items() if k.lower() != "range"})
 
         def _request_stream(req_h: dict):
             if self.method == "POST":
@@ -293,6 +310,7 @@ class DownloadTask:
                     allow_redirects=True,
                 )
                 if head_resp.status_code in (405, 501):  # HEAD 미지원 서버
+                    head_resp.close()
                     head_resp = session.get(
                         self.url,
                         timeout=REQUEST_TIMEOUT,
@@ -320,28 +338,6 @@ class DownloadTask:
         part_path = target_path + (
             f".{self.partial_id}.part" if self.partial_id else ".part"
         )
-        if not os.path.exists(part_path) and os.path.isdir(self.dest_dir):
-            # 이전에 다른 작업 ID로 다운로드 중이던 동일 파일명의 .part 임시 파일이 있다면 이어받기 위해 탐색
-            best_part = None
-            best_size = 0
-            for cand in os.listdir(self.dest_dir):
-                if cand.startswith(dest_filename) and cand.endswith(".part"):
-                    cand_full = os.path.join(self.dest_dir, cand)
-                    if os.path.isfile(cand_full):
-                        c_sz = os.path.getsize(cand_full)
-                        if c_sz > best_size:
-                            best_size = c_sz
-                            best_part = cand_full
-            if best_part and best_size > 0:
-                try:
-                    os.replace(best_part, part_path)
-                    logger.info(
-                        f"이전 임시 다운로드 파일 계승({best_size:,} bytes): {best_part} -> {part_path}"
-                    )
-                except Exception as e:
-                    logger.debug(f"임시 파일 계승 실패 ({e}), 기존 파일 사용: {best_part}")
-                    part_path = best_part
-
         # 2. 스트리밍 다운로드 및 자동 이어받기 재시도 루프
         MAX_RETRIES = self.max_retries
         stream_retry_count = 0
@@ -385,15 +381,7 @@ class DownloadTask:
 
                     resp.raise_for_status()
 
-                    # HTML 웹페이지/보호페이지 응답 검사 (직링크가 아닌 웹페이지를 다운로드로 오인하지 않도록 방지)
-                    ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-                    url_path = urlparse(self.url).path.lower()
-                    is_explicit_html = url_path.endswith((".html", ".htm"))
-                    if ct in ("text/html", "application/xhtml+xml") and not is_explicit_html:
-                        resp.close()
-                        raise ValueError(
-                            "다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다. 올바른 직링크가 아니거나 Cloudflare/로그인 등의 보호 페이지일 수 있습니다."
-                        )
+                    ct, is_explicit_html = _validate_file_response(resp, self.url)
 
                     # 첫 번째 요청 시 응답 헤더에서 더 정확한 파일명이 있으면 업데이트
                     if not header_resolved:
@@ -452,6 +440,17 @@ class DownloadTask:
                                     )
                             is_partial = resp.status_code == 206
 
+                    ct, is_explicit_html = _validate_file_response(resp, self.url)
+                    if is_partial:
+                        content_range = _parse_content_range(resp.headers.get("Content-Range", ""))
+                        if not content_range or content_range[2] is None:
+                            raise ValueError("Cannot verify partial response total size")
+                        length = resp.headers.get("Content-Length")
+                        if length and (not length.isdigit() or int(length) != content_range[1] - content_range[0] + 1):
+                            raise ValueError("Content-Length does not match Content-Range")
+                        if total_bytes is not None and total_bytes != content_range[2]:
+                            raise ValueError("Remote file size changed during resume")
+
                     if is_partial:
                         file_mode = "ab" if existing_size > 0 else "wb"
                         downloaded_bytes = existing_size
@@ -472,6 +471,10 @@ class DownloadTask:
                         total_bytes = int(cl) if cl and cl.isdigit() else None
 
                     # 4. 스트리밍 다운로드 루프
+                    response_bytes = 0
+                    response_limit = (
+                        content_range[1] - content_range[0] + 1 if is_partial else total_bytes
+                    )
                     last_report_time = time.time()
                     speed_calc_start = last_report_time
                     bytes_since_calc = 0
@@ -523,8 +526,11 @@ class DownloadTask:
                                             "다운로드 대상이 웹페이지(HTML) 또는 보안 확인(Cloudflare) 페이지입니다. 직링크를 확인해주세요."
                                         )
 
-                            f.write(chunk)
                             chunk_len = len(chunk)
+                            response_bytes += chunk_len
+                            if response_limit is not None and response_bytes > response_limit:
+                                raise ValueError("Download response exceeds declared length")
+                            f.write(chunk)
                             downloaded_bytes += chunk_len
                             bytes_since_calc += chunk_len
 
@@ -564,7 +570,9 @@ class DownloadTask:
                             "status": "paused" if self._is_paused else "cancelled",
                         }
 
-                    if total_bytes is not None and downloaded_bytes < total_bytes:
+                    if (response_limit is not None and response_bytes != response_limit) or (
+                        total_bytes is not None and downloaded_bytes != total_bytes
+                    ):
                         raise ValueError(
                             f"Incomplete download: expected {total_bytes}, received {downloaded_bytes}"
                         )
@@ -640,7 +648,7 @@ class DownloadTask:
                     except Exception:
                         pass
                     session = requests.Session()
-                    session.headers.update(req_headers)
+                    session.headers.update({k: v for k, v in req_headers.items() if k.lower() != "range"})
 
                     if wait_sec > 0:
                         steps = int(wait_sec / 0.1)
@@ -656,6 +664,12 @@ class DownloadTask:
                             "status": "paused" if self._is_paused else "cancelled",
                         }
 
+            if self._is_stopped:
+                if not self._is_paused and os.path.exists(part_path):
+                    os.remove(part_path)
+                return {"success": False,
+                        "status": "paused" if self._is_paused else "cancelled"}
+
             # 5. 다운로드 완료 후 .part -> 최종 파일명으로 rename
             if resp is not None:
                 resp.close()
@@ -665,10 +679,7 @@ class DownloadTask:
             with _FINALIZE_LOCK:
                 unique_name = get_unique_filename(self.dest_dir, dest_filename)
                 final_target_path = os.path.join(self.dest_dir, unique_name)
-                if os.path.exists(part_path):
-                    os.replace(part_path, final_target_path)
-                elif not os.path.exists(final_target_path):
-                    open(final_target_path, "ab").close()
+                os.replace(part_path, final_target_path)
             self.final_file_path = final_target_path
             self.filename = unique_name
 

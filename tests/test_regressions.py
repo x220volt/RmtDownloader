@@ -572,7 +572,7 @@ class ResolverLifecycleTests(unittest.TestCase):
         self.assertEqual(res["eta_seconds"], 60)
 
         # 3. bdecode & parse_torrent_file
-        torrent_bytes = b"d4:infod4:name9:test.file6:lengthi1048576eeee"
+        torrent_bytes = b"d4:infod4:name9:test.file6:lengthi1048576eee"
         with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as tf:
             tf.write(torrent_bytes)
             tf_path = tf.name

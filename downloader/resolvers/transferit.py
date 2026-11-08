@@ -16,6 +16,8 @@ from ..engine import (
 )
 from .base import BaseResolver
 
+from ..callbacks import safe_callback
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,7 +50,7 @@ class TransferitDownloadTask:
         self.pw_token = pw_token
         self.xh = xh
         self.chunk_size = chunk_size
-        self.progress_callback = progress_callback
+        self.progress_callback = safe_callback(progress_callback)
 
         self._is_paused = False
         self._is_stopped = False
