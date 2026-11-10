@@ -4,6 +4,23 @@
 
 ---
 
+## [v0.1.57] - 2026-11-10
+
+### 🛡️ GoFile 무설정 완전 자동 우회 (Auto-Proxy Fallback) 및 토큰 영구 저장 안정화
+* **무설정 실시간 자동 프록시 우회 (`downloader/resolvers/gofile.py`)**:
+  * 공인 IP 차단(TCP SYN Timeout) 또는 요청 속도 한도 초과(`HTTP 429 error-rateLimit`) 발생 시, 1~2초 내에 글로벌 무료 엘리트 프록시를 실시간 병렬 탐색하여 무인 자동 우회.
+  * API 메타데이터 분석만 경량 프록시로 우회하고, 실제 대용량 파일 다운로드는 GoFile 고속 CDN 스토리지 서버를 통해 회선 최고 속도로 직접 다운로드.
+* **게스트 토큰 디스크 영구 저장 (`gofile_session.json`)**:
+  * 게스트 계정 토큰을 디스크에 24시간 동안 보존하여 재시작이나 동시 요청 시 API 과호출로 인한 429 Rate Limit 원천 방지.
+* **토큰 만료 감지 및 셀프 힐링 (Self-Healing Auto-Retry)**:
+  * 장시간 가동 중 `error-wrongToken`, `error-token`, `error-accountId` 또는 401 반환 시 만료된 토큰을 자동 파기하고 즉시 새 토큰으로 재발급받아 자동 재시도.
+* **웹 토큰 Secret 불일치/타임아웃 자동 복구**:
+  * `error-notPremium` 발생 시 Secret 강제 갱신 후 재시도하며, 메인 웹페이지 연결 지연 시 안전한 백업 Secret(`DEFAULT_WT_SECRET`)으로 자동 폴백.
+* **설정 프록시(`gofile_proxy`) 실연동 및 429 친화적 안내**:
+  * 수동 설정된 프록시 옵션 실연동 및 작업 실패 상태의 실시간 `jobs.json` 동기화 보장.
+
+---
+
 ## [v0.1.49] - 2026-11-07
 
 ### 🩹 Linux/NAS 도커 환경 GoFile 토큰 추출 3단계 안전 폴백 탑재 (`downloader/resolvers/gofile.py`)

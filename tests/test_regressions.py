@@ -2256,6 +2256,127 @@ class GofilePasswordTests(unittest.TestCase):
             self.assertIn("비밀번호가 일치하지 않습니다", str(cm.exception))
             self.assertIn("wrong_password", str(cm.exception))
 
+    def test_gofile_wrong_token_auto_recovery(self):
+        """GoFile API가 error-wrongToken을 반환하면 토큰을 재발급받아 자동으로 재시도하는지 검증."""
+        from downloader.resolvers.gofile import GofileResolver
+
+        resolver = GofileResolver()
+        url = "https://gofile.io/d/TESTRETRY"
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        # 1차 시도: error-wrongToken, 2차 시도: 정상 파일 응답
+        resp_fail = MagicMock()
+        resp_fail.status_code = 401
+        resp_fail.json.return_value = {"status": "error-wrongToken", "data": {}}
+
+        resp_ok = MagicMock()
+        resp_ok.status_code = 200
+        resp_ok.json.return_value = {
+            "status": "ok",
+            "data": {
+                "type": "file",
+                "name": "Recovered.zip",
+                "link": "https://store.gofile.io/dl/Recovered.zip",
+            },
+        }
+        fake_session.get.side_effect = [resp_fail, resp_ok]
+
+        with (
+            patch("downloader.resolvers.gofile.requests.Session", return_value=fake_session),
+            patch("downloader.resolvers.gofile.get_guest_token", side_effect=["old_token", "new_token"]) as mock_tok,
+            patch("downloader.resolvers.gofile.get_gofile_secret", return_value="sec_123"),
+            patch("downloader.resolvers.gofile._clear_guest_token") as mock_clear,
+        ):
+            res = resolver.resolve(url)
+            self.assertEqual(res["url"], "https://store.gofile.io/dl/Recovered.zip")
+            mock_clear.assert_called_once()
+            self.assertEqual(mock_tok.call_count, 2)
+
+    def test_gofile_rate_limit_friendly_error(self):
+        """GoFile API가 error-rateLimit / HTTP 429를 반환하면 사용자 친화적인 메시지를 전달하는지 검증."""
+        from downloader.resolvers.gofile import GofileResolver
+
+        resolver = GofileResolver()
+        url = "https://gofile.io/d/TESTRATE"
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.json.return_value = {"status": "error-rateLimit", "data": {}}
+        fake_session.get.return_value = resp_429
+
+        with (
+            patch("downloader.resolvers.gofile.requests.Session", return_value=fake_session),
+            patch("downloader.resolvers.gofile.get_guest_token", return_value="token123"),
+            patch("downloader.resolvers.gofile.get_gofile_secret", return_value="sec_123"),
+        ):
+            with self.assertRaises(RuntimeError) as cm:
+                resolver.resolve(url)
+            self.assertIn("요청 한도 초과", str(cm.exception))
+            self.assertIn("Rate Limit", str(cm.exception))
+
+    def test_gofile_token_persistence(self):
+        """GoFile 게스트 토큰의 디스크 저장, 로드, 삭제가 정상 작동하는지 검증."""
+        import tempfile
+        from pathlib import Path
+        from downloader.resolvers import gofile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir) / "data" / "gofile_session.json"
+            with patch("downloader.resolvers.gofile._get_token_file_path", return_value=tmp_path):
+                # 1. 초기 상태는 None
+                self.assertIsNone(gofile._load_persisted_token())
+
+                # 2. 저장 후 로드 성공
+                gofile._save_persisted_token("persisted_test_token")
+                self.assertTrue(tmp_path.exists())
+                self.assertEqual(gofile._load_persisted_token(), "persisted_test_token")
+
+                # 3. 토큰 삭제
+                gofile._clear_guest_token()
+                self.assertFalse(tmp_path.exists())
+                self.assertIsNone(gofile._load_persisted_token())
+
+    def test_gofile_fallback_secret_on_timeout(self):
+        """GoFile 웹페이지 연결 시간 초과 시 기본 백업 secret으로 안전하게 폴백되는지 검증."""
+        import requests
+        from downloader.resolvers.gofile import get_gofile_secret, DEFAULT_WT_SECRET
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        fake_session.get.side_effect = requests.exceptions.ConnectTimeout("Connection timed out")
+
+        with patch("downloader.resolvers.gofile._cached_secret", None):
+            secret = get_gofile_secret(fake_session, force_refresh=True)
+            self.assertEqual(secret, DEFAULT_WT_SECRET)
+
+    def test_gofile_proxy_applied(self):
+        """GoFile 옵션에 프록시가 주어지면 requests.Session.proxies에 정상 설정되는지 검증."""
+        from downloader.resolvers.gofile import GofileResolver
+
+        resolver = GofileResolver()
+        url = "https://gofile.io/d/TESTPROXY"
+
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {
+            "status": "ok",
+            "data": {"type": "file", "name": "f.zip", "link": "https://store.gofile.io/f.zip"},
+        }
+        fake_session.get.return_value = resp
+
+        with (
+            patch("downloader.resolvers.gofile.requests.Session", return_value=fake_session),
+            patch("downloader.resolvers.gofile.get_guest_token", return_value="tok"),
+            patch("downloader.resolvers.gofile.get_gofile_secret", return_value="sec"),
+        ):
+            resolver.resolve(url, options={"gofile_proxy": "http://127.0.0.1:8080"})
+            self.assertEqual(fake_session.proxies, {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"})
+
 
 class MegaResolverTests(unittest.TestCase):
     def test_can_handle(self):

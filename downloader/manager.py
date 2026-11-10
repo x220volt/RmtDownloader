@@ -1244,6 +1244,7 @@ class DownloadManager:
                         job.status = "failed"
                         job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         job.error_message = f"링크 분석 실패: {e}"
+                        self._save_jobs()
                         self._broadcast("job_updated", job.to_dict())
                 job.thread = None
                 self.queue.task_done()
