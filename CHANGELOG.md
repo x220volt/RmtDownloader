@@ -4,6 +4,19 @@
 
 ---
 
+## [v0.1.58] - 2026-11-11
+
+### 🩹 HTML 첨부파일 다운로드 허용 및 Kone.gg 직접 링크 해석 안정화
+* **명시적 `.html`/`.htm` 첨부파일 다운로드 지원 (`downloader/engine.py`)**:
+  * GigaFile, Google Drive 등 동적 다운로드 엔드포인트(`/download.php` 등)에서 `Content-Disposition: attachment` 파일명 또는 리졸버가 확정한 `.html`/`.htm` 파일이 `<!doctype html>`로 시작할 때 웹페이지/Cloudflare 오류로 오탐 차단하던 문제 수정.
+  * Cloudflare 챌린지 페이지 및 `attachment` 없는 `text/html` 오류 페이지는 기존과 동일하게 안전 차단 유지.
+* **Kone.gg 직접 링크 해석 폴백 강화 (`downloader/resolvers/webpage.py`)**:
+  * Googlebot 요청 시 빈 SPA 셸 또는 429/403 응답이 반환되면 일반 Chrome User-Agent 재시도 및 `#post-article` 대기 스텔스 브라우저 폴백으로 자동 전환.
+* **다중 링크(`extra_jobs`) 출처 메타데이터 유지 (`downloader/manager.py`)**:
+  * 웹페이지 리졸버로 게시글 내 여러 파일을 등록할 때 원글 제목(`source_title`) 및 출처 URL(`source_url`)이 모든 후속 작업에 함께 전파되도록 개선.
+
+---
+
 ## [v0.1.57] - 2026-11-10
 
 ### 🛡️ GoFile 무설정 완전 자동 우회 (Auto-Proxy Fallback) 및 토큰 영구 저장 안정화

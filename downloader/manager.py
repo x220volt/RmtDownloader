@@ -1167,6 +1167,18 @@ class DownloadManager:
                     job.resolved_url = resolved["url"]
                     if resolved.get("filename"):
                         job.filename = resolved["filename"]
+                    resolved_source_title = str(
+                        resolved.get("article_title") or ""
+                    ).strip()
+                    resolved_source_url = str(
+                        resolved.get("source_page_url") or ""
+                    ).strip()
+                    if resolved_source_title and not job.source_title:
+                        job.source_title = resolved_source_title
+                        job.options["source_title"] = resolved_source_title
+                    if resolved_source_url and not job.source_url:
+                        job.source_url = resolved_source_url
+                        job.options["source_url"] = resolved_source_url
                     if resolved.get("options"):
                         job.options.update(resolved["options"])
                     if resolved.get("method"):

@@ -192,7 +192,15 @@ def _parse_content_range(header_val: str):
     return start_val, end_val, total_val
 
 
-def _validate_file_response(response, url):
+def _is_html_filename(name: str) -> bool:
+    """파일명 또는 경로가 명시적 HTML 파일(.html/.htm)인지 확인합니다."""
+    if not name:
+        return False
+    clean_name = name.split("?")[0].split("#")[0].strip().lower()
+    return clean_name.endswith((".html", ".htm"))
+
+
+def _validate_file_response(response, url, filename: str = ""):
     """Validate every response, including replacements after a range failure."""
     if response.status_code not in (200, 206):
         raise ValueError(f"Unexpected download response: HTTP {response.status_code}")
@@ -200,8 +208,22 @@ def _validate_file_response(response, url):
     if length is not None and not str(length).isdigit():
         raise ValueError("Invalid download Content-Length")
     content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
-    explicit_html = urlparse(url).path.lower().endswith((".html", ".htm"))
-    if content_type in ("text/html", "application/xhtml+xml") and not explicit_html:
+    is_html_ct = content_type in ("text/html", "application/xhtml+xml")
+
+    cd_raw = str(
+        response.headers.get("Content-Disposition")
+        or response.headers.get("content-disposition")
+        or ""
+    )
+    is_attachment = cd_raw.strip().lower().startswith("attachment")
+    header_filename = extract_filename_from_headers(response.headers, None)
+
+    explicit_html = (
+        _is_html_filename(urlparse(url).path)
+        or (is_attachment and _is_html_filename(header_filename))
+        or (_is_html_filename(filename) and (is_attachment or not is_html_ct))
+    )
+    if is_html_ct and not explicit_html:
         raise ValueError("다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.")
     return content_type, explicit_html
 
@@ -381,7 +403,9 @@ class DownloadTask:
 
                     resp.raise_for_status()
 
-                    ct, is_explicit_html = _validate_file_response(resp, self.url)
+                    ct, is_explicit_html = _validate_file_response(
+                        resp, self.url, self.filename
+                    )
 
                     # 첫 번째 요청 시 응답 헤더에서 더 정확한 파일명이 있으면 업데이트
                     if not header_resolved:
@@ -440,7 +464,9 @@ class DownloadTask:
                                     )
                             is_partial = resp.status_code == 206
 
-                    ct, is_explicit_html = _validate_file_response(resp, self.url)
+                    ct, is_explicit_html = _validate_file_response(
+                        resp, self.url, self.filename
+                    )
                     if is_partial:
                         content_range = _parse_content_range(resp.headers.get("Content-Range", ""))
                         if not content_range or content_range[2] is None:

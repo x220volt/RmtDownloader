@@ -400,7 +400,8 @@ class WebPageResolver(BaseResolver):
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
 
-        if "kone.gg" in host:
+        is_kone = "kone.gg" in host
+        if is_kone:
             headers["User-Agent"] = (
                 "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
             )
@@ -409,14 +410,36 @@ class WebPageResolver(BaseResolver):
         html_text = ""
         final_url = url
 
+        def _has_kone_content(doc_text: str) -> bool:
+            if not doc_text:
+                return False
+            if "api.kone.gg/v1/article/get" in doc_text:
+                return True
+            return 'id="post-article"' in doc_text
+
         if not need_browser:
             try:
                 with requests.Session() as session:
                     session.headers.update(headers)
                     resp = session.get(url, allow_redirects=True, timeout=20)
+                    if is_kone and (
+                        resp.status_code in (403, 429, 503)
+                        or (resp.ok and not _has_kone_content(resp.text))
+                    ):
+                        resp_chrome = session.get(
+                            url,
+                            headers={"User-Agent": DEFAULT_USER_AGENT},
+                            allow_redirects=True,
+                            timeout=20,
+                        )
+                        if resp_chrome.ok and (
+                            _has_kone_content(resp_chrome.text) or not resp.ok
+                        ):
+                            resp = resp_chrome
+
                     final_url = resp.url
                     if (
-                        resp.status_code in (403, 503)
+                        resp.status_code in (403, 429, 503)
                         or "Just a moment..." in resp.text
                         or "cf-browser-verification" in resp.text
                     ):
@@ -424,6 +447,8 @@ class WebPageResolver(BaseResolver):
                     else:
                         resp.raise_for_status()
                         html_text = _decode_response_html(resp)
+                        if is_kone and not _has_kone_content(html_text):
+                            need_browser = True
 
                         # 네이버 블로그 mainFrame 언래핑
                         if (
@@ -457,10 +482,15 @@ class WebPageResolver(BaseResolver):
                 from ..browser_solver import StealthBrowserSolver
 
                 flaresolverr_url = str(opts.get("flaresolverr_url") or "")
+                wait_sel = (
+                    "#post-article, .prose, article, main"
+                    if is_kone
+                    else ".write_div, .article-body, .prose, article, main, body"
+                )
                 browser_html = StealthBrowserSolver.fetch_html(
                     url,
                     flaresolverr_url=flaresolverr_url,
-                    wait_selector=".write_div, .article-body, .prose, article, main, body",
+                    wait_selector=wait_sel,
                     extra_wait_sec=2.5,
                     headless=True,
                 )

@@ -2613,5 +2613,115 @@ class ServerStorageEndpointTests(unittest.TestCase):
             self.assertEqual(info_data["storage"]["download_dir"], data["download_dir"])
 
 
+class HtmlAttachmentAndKonePageTests(unittest.TestCase):
+    """동적 다운로드 엔드포인트의 .html 첨부파일 허용 및 Kone.gg 직접 링크 해석 테스트."""
+
+    def test_explicit_html_attachment_download_succeeds(self):
+        html_bytes = b"<!doctype html><html lang='ko'><head><title>Skill Guide</title></head><body>OK</body></html>"
+        resp = Mock(
+            status_code=200,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": 'attachment; filename="guide.html"',
+                "Content-Length": str(len(html_bytes)),
+            },
+        )
+        resp.iter_content.return_value = [html_bytes]
+        resp.close = Mock()
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+            with patch("downloader.engine.requests.Session") as factory:
+                factory.return_value.get.return_value = resp
+                result = DownloadTask(
+                    "https://65.gigafile.nu/download.php?file=1234",
+                    folder,
+                    "guide.html",
+                ).run()
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual((Path(folder) / "guide.html").read_bytes(), html_bytes)
+
+    def test_html_filename_with_text_html_without_attachment_still_fails(self):
+        resp = Mock(
+            status_code=200,
+            headers={"Content-Type": "text/html; charset=utf-8", "Content-Length": "50"},
+        )
+        resp.iter_content.return_value = [b"<html><body>File expired</body></html>"]
+        resp.close = Mock()
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+            with patch("downloader.engine.requests.Session") as factory:
+                factory.return_value.get.return_value = resp
+                result = DownloadTask(
+                    "https://65.gigafile.nu/download.php?file=1234",
+                    folder,
+                    "guide.html",
+                ).run()
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("HTML", result["error"])
+
+    def test_html_attachment_with_cloudflare_challenge_still_fails(self):
+        cf_bytes = b"<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>challenges.cloudflare.com</body></html>"
+        resp = Mock(
+            status_code=200,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Disposition": 'attachment; filename="guide.html"',
+                "Content-Length": str(len(cf_bytes)),
+            },
+        )
+        resp.iter_content.return_value = [cf_bytes]
+        resp.close = Mock()
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+            with patch("downloader.engine.requests.Session") as factory:
+                factory.return_value.get.return_value = resp
+                result = DownloadTask(
+                    "https://65.gigafile.nu/download.php?file=1234",
+                    folder,
+                    "guide.html",
+                ).run()
+            self.assertEqual(result["status"], "failed")
+            self.assertIn("Cloudflare", result["error"])
+
+    def test_webpage_resolver_kone_chrome_ua_fallback(self):
+        from downloader.resolvers.webpage import WebPageResolver
+
+        empty_bot_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://kone.gg/s/retrogame/post123",
+            text="<html><body><div id='app'></div></body></html>",
+            content=b"<html><body><div id='app'></div></body></html>",
+            encoding="utf-8",
+            headers={"Content-Type": "text/html; charset=utf-8"},
+        )
+        rich_chrome_html = (
+            '<html><head><title>Sample Post - retrogame | 코네</title></head>'
+            '<body><div id="post-article"><p>https://gofile.io/d/AbCdEf</p></div></body></html>'
+        )
+        chrome_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://kone.gg/s/retrogame/post123",
+            text=rich_chrome_html,
+            content=rich_chrome_html.encode("utf-8"),
+            encoding="utf-8",
+            headers={"Content-Type": "text/html; charset=utf-8"},
+        )
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        fake_session.get.side_effect = [empty_bot_resp, chrome_resp]
+
+        resolver = WebPageResolver()
+        with patch("downloader.resolvers.webpage.requests.Session", return_value=fake_session):
+            html_text, final_url = resolver._fetch_html("https://kone.gg/s/retrogame/post123")
+        self.assertEqual(final_url, "https://kone.gg/s/retrogame/post123")
+        self.assertIn("gofile.io/d/AbCdEf", html_text)
+        title, cands = resolver.extract_candidates_from_html(html_text, final_url)
+        self.assertEqual(title, "Sample Post")
+        self.assertEqual(len(cands), 1)
+        self.assertEqual(cands[0]["url"], "https://gofile.io/d/AbCdEf")
+
+
 if __name__ == "__main__":
     unittest.main()

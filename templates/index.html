@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.57') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.58') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.57') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.58') }}</p>
         </div>
       </div>
 
@@ -423,7 +423,7 @@
               </p>
               <div class="settings-update-row">
                 <div class="settings-update-vers">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.57') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.58') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -934,6 +934,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.57') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.58') }}"></script>
 </body>
 </html>
