@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "원격 다운로더 (Remote Downloader)",
-  "version": "0.1.59",
+  "version": "0.1.60",
   "description": "클릭 한 번으로 현재 페이지나 링크를 원격 다운로더 PC 서버로 전송합니다.",
   "permissions": [
     "contextMenus",
     "storage",
     "notifications",
     "activeTab",
-    "scripting"
+    "scripting",
+    "clipboardRead"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -16,6 +17,18 @@
     "https://*/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js"

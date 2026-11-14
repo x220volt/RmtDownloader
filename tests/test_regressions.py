@@ -807,12 +807,22 @@ class ResolverLifecycleTests(unittest.TestCase):
         ext_dir = Path(BASE_DIR) / "extension"
         manifest = json.loads((ext_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["manifest_version"], 3)
+        self.assertIn("clipboardRead", manifest.get("permissions", []))
+        self.assertTrue(
+            any(
+                "content.js" in cs.get("js", [])
+                for cs in manifest.get("content_scripts", [])
+            )
+        )
         self.assertTrue((ext_dir / manifest["background"]["service_worker"]).is_file())
         self.assertTrue((ext_dir / manifest["action"]["default_popup"]).is_file())
+        self.assertTrue((ext_dir / "content.js").is_file())
 
         popup_html = (ext_dir / "popup.html").read_text(encoding="utf-8")
         soup = BeautifulSoup(popup_html, "html.parser")
         html_ids = {str(el["id"]) for el in soup.find_all(id=True)}
+        self.assertIn("clipboardAutoFillCheck", html_ids)
+        self.assertIn("clipboardCopyPromptCheck", html_ids)
         self.assertEqual(len(soup.find_all(style=True)), 0)
 
         popup_js = (ext_dir / "popup.js").read_text(encoding="utf-8")
@@ -822,6 +832,7 @@ class ResolverLifecycleTests(unittest.TestCase):
         for rel_js in (
             "extension/popup.js",
             "extension/background.js",
+            "extension/content.js",
             "static/js/app.js",
         ):
             code = (Path(BASE_DIR) / rel_js).read_text(encoding="utf-8")
@@ -861,6 +872,7 @@ class ResolverLifecycleTests(unittest.TestCase):
                 "popup.css",
                 "popup.js",
                 "background.js",
+                "content.js",
             ):
                 self.assertIn(expected, names)
             self.assertEqual(
@@ -2721,6 +2733,233 @@ class HtmlAttachmentAndKonePageTests(unittest.TestCase):
         self.assertEqual(title, "Sample Post")
         self.assertEqual(len(cands), 1)
         self.assertEqual(cands[0]["url"], "https://gofile.io/d/AbCdEf")
+
+
+class GigaFileBundleResolverTests(unittest.TestCase):
+    """GigaFile 다중 파일 묶음(matomete) 및 자식 파일 재해석 검증."""
+
+    @staticmethod
+    def _make_fake_session():
+        fake_session = MagicMock()
+        fake_session.__enter__.return_value = fake_session
+        fake_session.__exit__.return_value = False
+        fake_session.headers = {}
+        fake_session.cookies.get_dict.return_value = {"gfsid": "sess_token"}
+        return fake_session
+
+    def test_resolve_matomete_bundle_extracts_all_files(self):
+        from downloader.resolvers.gigafile import GigaFileResolver
+
+        bundle_html = """
+        <html><body>
+        <script>
+        var server = "65.gigafile.nu";
+        var dl_ajax_server = "65x.gigafile.nu";
+        var files = [{"file": "0219-aaa", "size": 100, "bypasses": []}, {"file": "0219-bbb", "size": 200, "bypasses": []}];
+        </script>
+        <div id="contents_matomete">
+            <div id="matomete_zip"><span id="matomete_zip_filename">bundle_pack.zip</span></div>
+            <div class="matomete_file">
+                <div class="matomete_file_info"><span>1</span><span class="matomete_file_name">A***.zip</span></div>
+                <button class="download_panel_btn_dl" onclick="download(0, '0219-aaa', false)">DL</button>
+            </div>
+            <div class="matomete_file">
+                <div class="matomete_file_info"><span>2</span><span class="matomete_file_name">B***.zip</span></div>
+                <button class="download_panel_btn_dl" onclick="download(1, '0219-bbb', false)">DL</button>
+            </div>
+        </div>
+        </body></html>
+        """
+        page_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://65.gigafile.nu/0219-bundle",
+            text=bundle_html,
+        )
+        name_resp_1 = Mock(status_code=200, ok=True)
+        name_resp_1.json.return_value = {"status": 0, "filename": "A.zip"}
+        name_resp_2 = Mock(status_code=200, ok=True)
+        name_resp_2.json.return_value = {"status": 0, "filename": "B.zip"}
+
+        fake_session = self._make_fake_session()
+        fake_session.get.side_effect = [page_resp, name_resp_1, name_resp_2]
+
+        with patch(
+            "downloader.resolvers.gigafile.requests.Session", return_value=fake_session
+        ):
+            resolved = GigaFileResolver().resolve("https://65.gigafile.nu/0219-bundle")
+
+        self.assertEqual(resolved["source_service"], "GigaFile")
+        self.assertEqual(
+            resolved["url"], "https://65.gigafile.nu/download.php?file=0219-aaa"
+        )
+        self.assertEqual(resolved["filename"], "A.zip")
+        self.assertEqual(resolved["size"], 100)
+        self.assertEqual(resolved["subfolder"], "bundle_pack")
+        self.assertIn("prog_key=", resolved["cookies"])
+        self.assertEqual(resolved["headers"]["Referer"], "https://65.gigafile.nu/0219-bundle")
+        self.assertEqual(len(resolved["files"]), 2)
+        self.assertEqual(
+            resolved["files"][0]["url"],
+            "https://65.gigafile.nu/download.php?file=0219-aaa",
+        )
+        self.assertEqual(resolved["files"][0]["name"], "A.zip")
+        self.assertEqual(
+            resolved["files"][1]["url"],
+            "https://65.gigafile.nu/download.php?file=0219-bbb",
+        )
+        self.assertEqual(resolved["files"][1]["name"], "B.zip")
+        self.assertEqual(resolved["files"][1]["size"], 200)
+
+    def test_re_resolve_child_download_php_url_without_recursive_files(self):
+        from downloader.resolvers.gigafile import GigaFileResolver
+
+        bundle_html = """
+        <script>
+        var server = "65.gigafile.nu";
+        var dl_ajax_server = "65x.gigafile.nu";
+        var files = [{"file": "0219-aaa", "size": 100}, {"file": "0219-bbb", "size": 200}];
+        </script>
+        <div id="contents_matomete">
+            <div class="matomete_file"><button class="download_panel_btn_dl" onclick="download(0, '0219-aaa', false)">DL</button></div>
+            <div class="matomete_file"><button class="download_panel_btn_dl" onclick="download(1, '0219-bbb', false)">DL</button></div>
+        </div>
+        """
+        page_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://65.gigafile.nu/0219-bundle",
+            text=bundle_html,
+        )
+        name_api_fail = Mock(status_code=500, ok=False)
+
+        fake_session = self._make_fake_session()
+        fake_session.get.side_effect = [page_resp, name_api_fail]
+
+        with patch(
+            "downloader.resolvers.gigafile.requests.Session", return_value=fake_session
+        ):
+            resolved = GigaFileResolver().resolve(
+                "https://65.gigafile.nu/download.php?file=0219-bbb",
+                options={
+                    "referer": "https://65.gigafile.nu/0219-bundle",
+                    "filename": "B.zip",
+                },
+            )
+
+        self.assertEqual(
+            fake_session.get.call_args_list[0].args[0],
+            "https://65.gigafile.nu/0219-bundle",
+        )
+        self.assertEqual(
+            resolved["url"], "https://65.gigafile.nu/download.php?file=0219-bbb"
+        )
+        self.assertEqual(resolved["filename"], "B.zip")
+        self.assertEqual(resolved["size"], 200)
+        self.assertNotIn("files", resolved)
+
+    def test_resolve_password_protected_matomete_bundle(self):
+        from downloader.resolvers.gigafile import GigaFileResolver
+
+        bundle_html = """
+        <script>
+        var server = "65.gigafile.nu";
+        var dl_ajax_server = "65x.gigafile.nu";
+        var files = [{"file": "0219-aaa", "size": 100}, {"file": "0219-bbb", "size": 200}];
+        </script>
+        <div id="contents_matomete">
+            <div class="matomete_file">
+                <input type="text" class="matomete_dlkey">
+                <button class="download_panel_btn_dl" onclick="download(0, '0219-aaa', true)">DL</button>
+            </div>
+            <div class="matomete_file">
+                <input type="text" class="matomete_dlkey">
+                <button class="download_panel_btn_dl" onclick="download(1, '0219-bbb', true)">DL</button>
+            </div>
+        </div>
+        """
+        page_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://65.gigafile.nu/0219-bundle",
+            text=bundle_html,
+        )
+        check_wrong = Mock(status_code=200, ok=True)
+        check_wrong.json.return_value = {"status": 1}
+        check_ok_1 = Mock(status_code=200, ok=True)
+        check_ok_1.json.return_value = {"status": 0}
+        name_resp_1 = Mock(status_code=200, ok=True)
+        name_resp_1.json.return_value = {"status": 0, "filename": "A.zip"}
+        check_ok_2 = Mock(status_code=200, ok=True)
+        check_ok_2.json.return_value = {"status": 0}
+        name_resp_2 = Mock(status_code=200, ok=True)
+        name_resp_2.json.return_value = {"status": 0, "filename": "B.zip"}
+
+        fake_session = self._make_fake_session()
+        fake_session.get.side_effect = [
+            page_resp,
+            check_wrong,
+            check_ok_1,
+            name_resp_1,
+            check_ok_2,
+            name_resp_2,
+        ]
+
+        with patch(
+            "downloader.resolvers.gigafile.requests.Session", return_value=fake_session
+        ):
+            resolved = GigaFileResolver().resolve(
+                "https://65.gigafile.nu/0219-bundle",
+                options={"candidate_passwords": "wrong, 1234"},
+            )
+
+        self.assertIn("dlkey=1234", resolved["url"])
+        self.assertEqual(len(resolved["files"]), 2)
+        self.assertIn("dlkey=1234", resolved["files"][0]["url"])
+        self.assertIn("dlkey=1234", resolved["files"][1]["url"])
+
+    def test_resolve_matomete_zip_fallback(self):
+        from downloader.resolvers.gigafile import GigaFileResolver
+
+        zip_only_html = """
+        <script>
+        var server = "65.gigafile.nu";
+        var dl_ajax_server = "65x.gigafile.nu";
+        </script>
+        <div id="contents_matomete">
+            <div id="matomete_zip">
+                <span id="matomete_zip_filename">archive_bundle</span>
+                <input type="password" id="matomete_zip_dlkey">
+                <button onclick="download_zip('0219-bundle', true)">ZIP DL</button>
+            </div>
+        </div>
+        """
+        page_resp = Mock(
+            status_code=200,
+            ok=True,
+            url="https://65.gigafile.nu/0219-bundle",
+            text=zip_only_html,
+        )
+        check_ok = Mock(status_code=200, ok=True)
+        check_ok.json.return_value = {"status": 0}
+
+        fake_session = self._make_fake_session()
+        fake_session.get.side_effect = [page_resp, check_ok]
+
+        with patch(
+            "downloader.resolvers.gigafile.requests.Session", return_value=fake_session
+        ):
+            resolved = GigaFileResolver().resolve(
+                "https://65.gigafile.nu/0219-bundle",
+                options={"password": "4321"},
+            )
+
+        self.assertEqual(
+            resolved["url"],
+            "https://65.gigafile.nu/dl_zip.php?file=0219-bundle&dlkey=4321",
+        )
+        self.assertEqual(resolved["filename"], "archive_bundle.zip")
+        self.assertEqual(check_ok_call := fake_session.get.call_args_list[1].kwargs["params"], {"file": "0219-bundle", "dlkey": "4321", "is_zip": 1})
 
 
 if __name__ == "__main__":

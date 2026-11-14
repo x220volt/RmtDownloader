@@ -58,7 +58,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 // 3. 서버로 URL 전송하는 공통 함수
-async function sendToServer(url, referer = "") {
+async function sendToServer(url, referer = "", extraOptions = {}) {
   let config = {};
   try {
     if (chrome.storage && chrome.storage.local) {
@@ -100,6 +100,19 @@ async function sendToServer(url, referer = "") {
   if (referer) {
     payload.referer = referer;
   }
+  if (extraOptions.password) {
+    payload.password = extraOptions.password;
+    payload.terabox_password = extraOptions.password;
+  }
+  if (extraOptions.subfolder) {
+    payload.subfolder = extraOptions.subfolder;
+  }
+  if (extraOptions.sourceTitle) {
+    payload.source_title = extraOptions.sourceTitle;
+  }
+  if (extraOptions.sourceUrl) {
+    payload.source_url = extraOptions.sourceUrl;
+  }
   if (config && typeof config.capturePage === "boolean" && config.capturePage) {
     payload.capture_page = true;
   }
@@ -125,18 +138,26 @@ async function sendToServer(url, referer = "") {
           "인증 실패 (401)",
           "비밀번호가 올바르지 않습니다. 확장 프로그램 아이콘을 클릭하여 비밀번호를 설정하세요."
         );
-        return;
+        return { ok: false, error: "인증 실패 (401)" };
       }
 
       if (res.ok && data.success) {
         const count = data.added_count || 1;
+        if (extraOptions.rawClipboardText && chrome.storage && chrome.storage.local) {
+          try {
+            chrome.storage.local.set({ lastSentClipboardText: extraOptions.rawClipboardText }, () => {
+              void chrome.runtime.lastError;
+            });
+          } catch (e) {}
+        }
         flashActionBadge("✓", "#10b981");
         showNotification("다운로드 추가 완료", `${count}개의 다운로드 작업이 원격 PC로 전송되었습니다!`);
-        return;
+        return { ok: true, count: count };
       } else {
+        const errMsg = data.error || "서버에서 오류를 반환했습니다.";
         flashActionBadge("!", "#ef4444");
-        showNotification("전송 실패", data.error || "서버에서 오류를 반환했습니다.");
-        return;
+        showNotification("전송 실패", errMsg);
+        return { ok: false, error: errMsg };
       }
     } catch (err) {
       // 다음 URL(localhost <-> 127.0.0.1)로 재시도
@@ -148,6 +169,7 @@ async function sendToServer(url, referer = "") {
     "서버 연결 실패",
     `서버(${serverUrl})에 접속할 수 없습니다. PC 서버가 켜져 있는지 확인하세요.`
   );
+  return { ok: false, error: "서버 연결 실패" };
 }
 
 // 4. 확장 아이콘 배지 피드백
@@ -180,10 +202,18 @@ function showNotification(title, message) {
   } catch (e) {}
 }
 
-// 6. 팝업에서 메시지를 보낼 때 수신 리스너
+// 6. 팝업 및 콘텐츠 스크립트에서 메시지를 보낼 때 수신 리스너
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request && request.action === "sendUrl") {
-    sendToServer(request.url, request.referer || "").then(() => sendResponse({ status: "done" }));
+    sendToServer(request.url, request.referer || "", {
+      password: request.password || "",
+      subfolder: request.subfolder || "",
+      sourceTitle: request.sourceTitle || "",
+      sourceUrl: request.sourceUrl || "",
+      rawClipboardText: request.rawClipboardText || "",
+    })
+      .then((result) => sendResponse(Object.assign({ status: "done" }, result || {})))
+      .catch((err) => sendResponse({ ok: false, error: err ? err.message : "unknown" }));
     return true; // 비동기 응답 유지
   }
 });

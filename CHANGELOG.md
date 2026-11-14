@@ -4,6 +4,19 @@
 
 ---
 
+## [v0.1.60] - 2026-11-14
+
+### 📦 GigaFile 묶음 파일(まとめ) 지원 및 크롬 확장 프로그램 클립보드 자동 감지
+* **GigaFile(`gigafile.nu` / `xgf.nu`) 다중 파일 묶음 다운로드 지원 (`downloader/resolvers/gigafile.py`)**:
+  * 여러 파일이 묶음(`matomete` / `var files = [...]`)으로 업로드된 페이지에서 개별 파일 목록(`file` ID·크기·파일명)을 파싱하고, 각 하위 파일을 `download.php?file=<id>` 기반 개별 큐(`extra_items`)로 자동 등록하도록 개선.
+  * 단일 자식 파일의 직접 다운로드 URL 재해석 및 `dl_zip.php`(`is_zip=1`) 일괄 ZIP 폴백 경로 추가.
+* **크롬 확장 프로그램 클립보드 자동 감지·안내 토스트·자동 입력 (`extension/content.js`, `extension/background.js`, `extension/popup.js`, `extension/popup.html`, `extension/popup.css`, `extension/manifest.json`)**:
+  * 웹페이지에서 다운로드 가능 링크·Base64 코드·비밀번호를 복사(`copy`)하면 우측 하단에 Shadow DOM 플로팅 토스트(`📥 원격 다운로드` / `닫기`)를 띄워 즉시 원격 다운로드를 요청할 수 있는 기능 추가.
+  * 확장 프로그램 팝업을 열 때 클립보드(`clipboardRead`)의 다운로드 가능 주소 및 비밀번호를 자동 분석하여 입력창(`#manualUrlInput` / `#manualPasswordInput`)에 자동 채우기(`tryAutoFillFromClipboard`) 및 `lastSentClipboardText` 중복 입력 방지 적용.
+  * 설정 모달에 두 기능(`#clipboardAutoFillCheck`, `#clipboardCopyPromptCheck`)의 ON/OFF 토글 체크박스 추가.
+
+---
+
 ## [v0.1.59] - 2026-11-14
 
 ### 🛠 전체 코드베이스 리팩토링, 정적 타입 안정성 강화 및 지원 플랫폼 UI 동기화

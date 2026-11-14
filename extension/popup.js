@@ -52,6 +52,8 @@ const settingsContent = document.getElementById("settingsContent");
 const serverUrlInput = document.getElementById("serverUrlInput");
 const usernameInput = document.getElementById("usernameInput");
 const passwordInput = document.getElementById("passwordInput");
+const clipboardAutoFillCheck = document.getElementById("clipboardAutoFillCheck");
+const clipboardCopyPromptCheck = document.getElementById("clipboardCopyPromptCheck");
 const testConnBtn = document.getElementById("testConnBtn");
 const saveSettingsBtn = document.getElementById("saveSettingsBtn");
 const testResult = document.getElementById("testResult");
@@ -79,11 +81,13 @@ let pollTimer = null;
 let isFetching = false;
 let toastTimer = null;
 let latestReleaseData = null;
+let autoFilledClipboardRawText = "";
 const UPDATE_CHECK_CACHE_MS = 20 * 60 * 1000; // 20분 캐시
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   setupEventListeners();
+  await tryAutoFillFromClipboard();
 
   // 최신 릴리즈 확인 (백그라운드에서 비동기 체크)
   checkForExtensionUpdate();
@@ -327,6 +331,18 @@ function setupEventListeners() {
     saveSettingsBtn.addEventListener("click", saveSettings);
   }
 
+  // 클립보드 옵션 체크박스 즉시 저장
+  if (clipboardAutoFillCheck) {
+    clipboardAutoFillCheck.addEventListener("change", () => {
+      setStorageConfig({ clipboardAutoFill: clipboardAutoFillCheck.checked });
+    });
+  }
+  if (clipboardCopyPromptCheck) {
+    clipboardCopyPromptCheck.addEventListener("change", () => {
+      setStorageConfig({ clipboardCopyPrompt: clipboardCopyPromptCheck.checked });
+    });
+  }
+
   // 팝업 페이징 버튼
   if (popupPrevBtn) {
     popupPrevBtn.addEventListener("click", () => {
@@ -386,15 +402,16 @@ function normalizeServerUrl(url) {
 }
 
 async function getStorageConfig() {
+  const keys = ["serverUrl", "username", "password", "capturePage", "clipboardAutoFill", "clipboardCopyPrompt"];
   return new Promise((resolve) => {
     try {
       if (chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["serverUrl", "username", "password", "capturePage"], (localItems) => {
+        chrome.storage.local.get(keys, (localItems) => {
           if (!chrome.runtime.lastError && localItems && (localItems.serverUrl || localItems.password || typeof localItems.capturePage === "boolean")) {
             return resolve(localItems);
           }
           if (chrome.storage.sync) {
-            chrome.storage.sync.get(["serverUrl", "username", "password", "capturePage"], (syncItems) => {
+            chrome.storage.sync.get(keys, (syncItems) => {
               resolve(Object.assign({}, syncItems || {}, localItems || {}));
             });
           } else {
@@ -432,7 +449,12 @@ async function loadSettings() {
   serverUrlInput.value = config.serverUrl || "http://127.0.0.1:7971";
   usernameInput.value = config.username || "admin";
   passwordInput.value = config.password || "";
-
+  if (clipboardAutoFillCheck) {
+    clipboardAutoFillCheck.checked = config.clipboardAutoFill !== false;
+  }
+  if (clipboardCopyPromptCheck) {
+    clipboardCopyPromptCheck.checked = config.clipboardCopyPrompt !== false;
+  }
 }
 
 async function saveSettings() {
@@ -447,6 +469,8 @@ async function saveSettings() {
     serverUrl: serverUrl,
     username: username,
     password: password,
+    clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
+    clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
   });
 
   showTestResult(true, "설정이 저장되었습니다. 서버 연결을 확인하는 중...");
@@ -596,6 +620,8 @@ async function runConnectionTest() {
           serverUrl: testUrl,
           username: username,
           password: password,
+          clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
+          clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
         });
 
         showTestResult(true, `✅ 연결 및 인증 성공! (${data.username} 계정으로 설정이 저장되었습니다)`);
@@ -1165,6 +1191,187 @@ function escapeHtml(str) {
 }
 
 // ==========================================
+// 클립보드 다운로드 링크 감지 및 자동 입력
+// ==========================================
+
+const CLIPBOARD_HOSTING_PATTERNS = [
+  /mega\.(?:nz|co\.nz|io)\/(?:file\/|folder\/|#?!)/i,
+  /(?:1024terabox|terabox|teraboxapp|freeterabox|1024tera|teraboxlink)\.(?:com|app)/i,
+  /gofile\.io\/d\//i,
+  /1fichier\.com\/\?/i,
+  /transfer\.it\/t\//i,
+  /(?:gigafile\.nu|xgf\.nu)\//i,
+  /kio\.ac\/[cf]\//i,
+  /mybox\.naver\.com\/share\//i,
+  /downapi\.cafe\.naver\.com/i,
+  /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i,
+  /rootz\.so\/d\//i,
+  /romsfun\.com\/download\//i,
+  /romspure\.cc\/(?:download|roms)\//i,
+  /wowroms\.com\//i,
+  /planetemu\.net\/(?:[a-z]{2}\/)?(?:roms?\/[^/?#]+\/[^/?#]+|download\/rom)/i,
+  /vimm\.net\/vault\//i,
+  /x-share\.net\/[sb]\//i,
+  /(?:drive|docs|drive\.usercontent)\.google\.com\/(?:file\/(?:u\/\d+\/)?d\/|open\?id=|uc\?(?:[^#\s]*&)?id=|drive\/(?:u\/\d+\/)?folders\/|download\?id=)/i,
+  /mediafire\.com\/(?:file|download|view|\?)/i,
+  /filekeeper\.net\/[a-zA-Z0-9_-]+/i,
+  /datanodes\.to\/[a-zA-Z0-9_-]+/i,
+  /(?:buzzheavier\.com|bzzhr\.to)\/[a-zA-Z0-9_-]+/i,
+  /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i,
+  /megaup\.net\//i,
+  /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i,
+];
+
+const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
+
+function decodeClipboardBase64Once(token) {
+  if (!token || token.length < 16) return "";
+  try {
+    let normalized = token.replace(/-/g, "+").replace(/_/g, "/");
+    while (normalized.length % 4 !== 0) {
+      normalized += "=";
+    }
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes).trim();
+    if (!decoded || /[\x00-\x08\x0e-\x1f]/.test(decoded)) {
+      return "";
+    }
+    return decoded;
+  } catch (e) {
+    return "";
+  }
+}
+
+function decodeClipboardBase64Chain(token) {
+  let current = decodeClipboardBase64Once(token);
+  if (!current) return "";
+  if (/^[A-Za-z0-9+/_-]{16,}={0,2}$/.test(current)) {
+    const second = decodeClipboardBase64Once(current);
+    if (second) {
+      current = second;
+    }
+  }
+  return current;
+}
+
+function isSupportedDownloadUrl(candidate, fromBase64 = false) {
+  if (!candidate) return false;
+  if (candidate.startsWith("magnet:?")) return true;
+  if (CLIPBOARD_HOSTING_PATTERNS.some((re) => re.test(candidate))) return true;
+  if (CLIPBOARD_FILE_EXT_REGEX.test(candidate)) return true;
+  if (fromBase64) {
+    try {
+      const parsed = new URL(candidate);
+      return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname.includes(".");
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
+
+function parseClipboardDownloadText(rawText) {
+  const text = (rawText || "").trim();
+  if (!text || text.length > 8000) return null;
+
+  const urlRegex = /(?:https?:\/\/[^\s<>"'`|]+|magnet:\?xt=[^\s<>"'`|]+)/gi;
+  const b64Regex = /(?:[A-Za-z0-9+/_-]{16,}={0,2})/g;
+  const pwRegex = /(?:비번|암호|비밀번호|추출\s*코드|dlkey|pwd|pw|pass|password|code)\s*[:=]\s*([^\s"'<>\n\r,;]{2,32})|(?:비번|암호|비밀번호|추출\s*코드)\s+([a-zA-Z0-9_!@#$%^&*-]{2,32})/i;
+
+  const urls = [];
+  const seen = new Set();
+
+  const tryAdd = (raw, fromBase64) => {
+    const cleaned = (raw || "").trim().replace(/[.,;:)\]>\x7d"']+$/, "");
+    if (!cleaned || seen.has(cleaned)) return;
+    if (!isSupportedDownloadUrl(cleaned, fromBase64)) return;
+    seen.add(cleaned);
+    urls.push(cleaned);
+  };
+
+  let m;
+  while ((m = urlRegex.exec(text)) !== null) {
+    tryAdd(m[0], false);
+  }
+
+  let b64m;
+  while ((b64m = b64Regex.exec(text)) !== null) {
+    const decoded = decodeClipboardBase64Chain(b64m[0]);
+    if (!decoded) continue;
+    if (decoded.includes("http://") || decoded.includes("https://") || decoded.includes("magnet:?")) {
+      const inner = decoded.match(urlRegex);
+      if (inner) {
+        for (const u of inner) {
+          tryAdd(u, true);
+        }
+      }
+    }
+  }
+
+  if (urls.length === 0) return null;
+
+  let password = "";
+  const pwMatch = text.match(pwRegex);
+  if (pwMatch) {
+    password = (pwMatch[1] || pwMatch[2] || "").trim();
+  }
+
+  return { urls, password };
+}
+
+async function tryAutoFillFromClipboard() {
+  try {
+    const config = await getStorageConfig();
+    if (config.clipboardAutoFill === false) return;
+    if (!manualUrlInput || manualUrlInput.value.trim() !== "") return;
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") return;
+
+    const clipText = (await navigator.clipboard.readText() || "").trim();
+    if (!clipText) return;
+
+    const stored = await new Promise((resolve) => {
+      try {
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.get(["lastSentClipboardText"], (items) => {
+            void chrome.runtime.lastError;
+            resolve(items || {});
+          });
+        } else {
+          resolve({});
+        }
+      } catch (e) {
+        resolve({});
+      }
+    });
+
+    if (stored.lastSentClipboardText && stored.lastSentClipboardText === clipText) {
+      return;
+    }
+
+    const parsed = parseClipboardDownloadText(clipText);
+    if (!parsed || parsed.urls.length === 0) return;
+
+    if (directAddContent && !directAddContent.classList.contains("show")) {
+      directAddContent.classList.add("show");
+      if (directAddArrow) directAddArrow.textContent = "▲";
+    }
+
+    manualUrlInput.value = parsed.urls.join("\n");
+    if (parsed.password && manualPasswordInput && !manualPasswordInput.value.trim()) {
+      manualPasswordInput.value = parsed.password;
+    }
+    autoFilledClipboardRawText = clipText;
+    showPopupToast(`📋 클립보드에서 ${parsed.urls.length}개의 다운로드 링크를 불러왔습니다.`);
+  } catch (e) {
+    // 클립보드 읽기 거부/비어있음 등은 조용히 무시
+  }
+}
+
+// ==========================================
 // URL 전송 관련
 // ==========================================
 
@@ -1227,6 +1434,13 @@ async function sendManualUrl() {
     } catch (e) {}
 
     const resData = await sendUrl(raw, subfolder, password, "", referer, sourceTitle, referer);
+    try {
+      const sentClipVal = autoFilledClipboardRawText || raw;
+      if (sentClipVal && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ lastSentClipboardText: sentClipVal });
+      }
+    } catch (e) {}
+    autoFilledClipboardRawText = "";
     manualUrlInput.value = "";
     if (manualSubfolderInput) manualSubfolderInput.value = "";
     if (manualPasswordInput) manualPasswordInput.value = "";
