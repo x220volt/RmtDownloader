@@ -4,6 +4,20 @@
 
 ---
 
+## [v0.1.61] - 2026-11-14
+
+### 📋 크롬 확장 프로그램 오프스크린 클립보드 감시 및 알림 토스트 보완
+* **오프스크린 클립보드 감시 도입 (`extension/manifest.json`, `extension/offscreen.html`, `extension/offscreen.js`)**:
+  * `"offscreen"` 권한 및 백그라운드 오프스크린 모니터(`POLL_INTERVAL_MS = 800`ms)를 추가하여 우클릭 **링크 주소 복사**, 웹사이트 **복사 버튼(`navigator.clipboard.writeText`)**, 브라우저 주소창 복사 등 웹페이지 `copy` 이벤트가 발생하지 않는 복사 동작도 자동 감지하도록 개선.
+* **백그라운드 기존 탭 자동 주입 및 시스템 알림 폴백 (`extension/background.js`)**:
+  * `ensureOffscreenDocument()` 및 `injectContentScriptToExistingTabs()`를 통해 확장 설치·업데이트·브라우저 시작 시 이미 열려 있던 HTTP/HTTPS 탭에도 새로고침(`F5`) 없이 `content.js`를 자동 주입.
+  * 토스트를 띄울 수 없는 특수 탭(`chrome://`, 새 탭 등)에서는 `[📥 원격 다운로드]` / `[닫기]` 버튼이 포함된 Chrome 시스템 알림(`showClipboardPromptNotification`)으로 폴백 지원.
+* **콘텐츠 스크립트 링크 추출 및 재주입 안전성 강화 (`extension/content.js`)**:
+  * `copy`, `click`, `contextmenu` 이벤트 직후 백그라운드 클립보드 즉시 검사(`checkClipboardNow`)를 호출하고, 선택 영역 내 `<a href="...">` 링크 추출 및 Tistory 패턴 동기화 적용.
+  * `window.__rdClipboardMonitorCleanup()`으로 재주입 시 기존 리스너·타이머를 안전하게 정리하도록 개선.
+
+---
+
 ## [v0.1.60] - 2026-11-14
 
 ### 📦 GigaFile 묶음 파일(まとめ) 지원 및 크롬 확장 프로그램 클립보드 자동 감지

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "원격 다운로더 (Remote Downloader)",
-  "version": "0.1.60",
+  "version": "0.1.61",
   "description": "클릭 한 번으로 현재 페이지나 링크를 원격 다운로더 PC 서버로 전송합니다.",
   "permissions": [
     "contextMenus",
@@ -9,7 +9,8 @@
     "notifications",
     "activeTab",
     "scripting",
-    "clipboardRead"
+    "clipboardRead",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>",

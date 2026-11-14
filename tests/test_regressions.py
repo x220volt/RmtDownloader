@@ -808,6 +808,7 @@ class ResolverLifecycleTests(unittest.TestCase):
         manifest = json.loads((ext_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["manifest_version"], 3)
         self.assertIn("clipboardRead", manifest.get("permissions", []))
+        self.assertIn("offscreen", manifest.get("permissions", []))
         self.assertTrue(
             any(
                 "content.js" in cs.get("js", [])
@@ -817,6 +818,8 @@ class ResolverLifecycleTests(unittest.TestCase):
         self.assertTrue((ext_dir / manifest["background"]["service_worker"]).is_file())
         self.assertTrue((ext_dir / manifest["action"]["default_popup"]).is_file())
         self.assertTrue((ext_dir / "content.js").is_file())
+        self.assertTrue((ext_dir / "offscreen.html").is_file())
+        self.assertTrue((ext_dir / "offscreen.js").is_file())
 
         popup_html = (ext_dir / "popup.html").read_text(encoding="utf-8")
         soup = BeautifulSoup(popup_html, "html.parser")
@@ -833,6 +836,7 @@ class ResolverLifecycleTests(unittest.TestCase):
             "extension/popup.js",
             "extension/background.js",
             "extension/content.js",
+            "extension/offscreen.js",
             "static/js/app.js",
         ):
             code = (Path(BASE_DIR) / rel_js).read_text(encoding="utf-8")
@@ -873,6 +877,8 @@ class ResolverLifecycleTests(unittest.TestCase):
                 "popup.js",
                 "background.js",
                 "content.js",
+                "offscreen.html",
+                "offscreen.js",
             ):
                 self.assertIn(expected, names)
             self.assertEqual(

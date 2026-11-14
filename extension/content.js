@@ -1,19 +1,21 @@
 /**
  * 원격 다운로더 (Remote Downloader) Chrome Extension Content Script
- * 웹페이지에서 다운로드 가능한 주소를 복사(Ctrl+C / copy 이벤트)할 때
+ * 웹페이지에서 다운로드 가능한 주소를 복사(Ctrl+C, 우클릭 링크 복사, 복사 버튼 등)할 때
  * 화면 우측 하단에 원격 다운로드 알림 토스트를 표시합니다.
  */
 (() => {
   "use strict";
 
-  if (window.__rdClipboardMonitorLoaded) {
-    return;
+  if (typeof window.__rdClipboardMonitorCleanup === "function") {
+    try {
+      window.__rdClipboardMonitorCleanup();
+    } catch (e) {}
   }
-  window.__rdClipboardMonitorLoaded = true;
 
   const HOST_ELEMENT_ID = "rd-clipboard-toast-host";
   const MAX_COPY_TEXT_LENGTH = 8000;
   const TOAST_AUTO_HIDE_MS = 7500;
+  const DUPLICATE_TOAST_COOLDOWN_MS = 3500;
 
   const HOSTING_PATTERNS = [
     { service: "MEGA", regex: /mega\.(?:nz|co\.nz|io)\/(?:file\/|folder\/|#?!)/i },
@@ -25,7 +27,7 @@
     { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
     { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
     { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
-    { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dn|daumcdn\.net)/i },
+    { service: "Tistory", regex: /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
     { service: "Romsfun", regex: /romsfun\.com\/download\//i },
     { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
@@ -50,8 +52,16 @@
 
   let clipboardPromptEnabled = true;
   let hideTimer = null;
+  let copyTimer = null;
+  let clipboardCheckTimers = [];
   let lastPromptRawText = "";
   let lastPromptAt = 0;
+
+  function isRemoteDownloaderDashboard() {
+    return Boolean(
+      document.getElementById("jobsContainer") && document.getElementById("urlInput")
+    );
+  }
 
   function loadPromptSetting() {
     try {
@@ -70,13 +80,15 @@
 
   loadPromptSetting();
 
+  function onStorageChanged(changes, areaName) {
+    if (areaName === "local" && changes.clipboardCopyPrompt) {
+      clipboardPromptEnabled = changes.clipboardCopyPrompt.newValue !== false;
+    }
+  }
+
   try {
     if (chrome.storage && chrome.storage.onChanged) {
-      chrome.storage.onChanged.addListener((changes, areaName) => {
-        if (areaName === "local" && changes.clipboardCopyPrompt) {
-          clipboardPromptEnabled = changes.clipboardCopyPrompt.newValue !== false;
-        }
-      });
+      chrome.storage.onChanged.addListener(onStorageChanged);
     }
   } catch (e) {}
 
@@ -203,6 +215,32 @@
     };
   }
 
+  function resolveAnchorHref(anchorEl) {
+    if (!anchorEl) return "";
+    try {
+      const rawHref = anchorEl.getAttribute("href") || "";
+      if (!rawHref || rawHref.startsWith("#") || /^javascript:/i.test(rawHref)) {
+        return "";
+      }
+      const absUrl = new URL(rawHref, document.baseURI).href;
+      if (/^(?:https?:\/\/|magnet:\?)/i.test(absUrl)) {
+        return absUrl;
+      }
+    } catch (e) {}
+    return "";
+  }
+
+  function findClosestAnchorHref(node) {
+    let cur = node;
+    while (cur && cur !== document) {
+      if (cur.nodeType === 1 && cur.tagName === "A" && cur.hasAttribute("href")) {
+        return resolveAnchorHref(cur);
+      }
+      cur = cur.parentNode;
+    }
+    return "";
+  }
+
   function getSelectedCopyText(event) {
     const active = document.activeElement;
     if (active && (active.tagName === "TEXTAREA" || active.tagName === "INPUT")) {
@@ -214,8 +252,41 @@
       }
     }
 
-    const sel = window.getSelection ? String(window.getSelection() || "").trim() : "";
-    if (sel) return sel;
+    try {
+      const sel = window.getSelection ? window.getSelection() : null;
+      const selText = sel ? String(sel).trim() : "";
+
+      if (selText && parseDownloadableClipboardText(selText)) {
+        return selText;
+      }
+
+      if (sel && sel.rangeCount > 0) {
+        const anchorHrefs = [];
+        const addHref = (href) => {
+          if (href && !anchorHrefs.includes(href)) {
+            anchorHrefs.push(href);
+          }
+        };
+
+        const range = sel.getRangeAt(0);
+        const ancestorHref = findClosestAnchorHref(range.commonAncestorContainer);
+        if (ancestorHref) {
+          addHref(ancestorHref);
+        }
+        const fragment = range.cloneContents();
+        if (fragment && typeof fragment.querySelectorAll === "function") {
+          const anchors = fragment.querySelectorAll("a[href]");
+          for (const a of anchors) {
+            addHref(resolveAnchorHref(a));
+          }
+        }
+        if (anchorHrefs.length > 0) {
+          return selText ? `${anchorHrefs.join("\n")}\n${selText}` : anchorHrefs.join("\n");
+        }
+      }
+
+      if (selText) return selText;
+    } catch (e) {}
 
     try {
       if (event && event.clipboardData) {
@@ -246,12 +317,14 @@
   }
 
   function showClipboardDownloadToast(parsed, rawText) {
-    if (!document.body) return;
+    const container = document.body || document.documentElement;
+    if (!container) return false;
     removeToast();
 
     const host = document.createElement("div");
     host.id = HOST_ELEMENT_ID;
-    host.style.cssText = "all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483647;";
+    host.style.cssText =
+      "all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483647; display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;";
 
     const shadow = host.attachShadow({ mode: "open" });
 
@@ -519,36 +592,132 @@
 
     shadow.appendChild(styleEl);
     shadow.appendChild(card);
-    document.body.appendChild(host);
+    container.appendChild(host);
     scheduleToastAutoHide();
+    return true;
   }
 
-  document.addEventListener(
-    "copy",
-    (event) => {
-      if (!clipboardPromptEnabled) return;
-      // 원격 다운로더 자체 웹 대시보드 내 복사 동작은 알림을 띄우지 않음
-      if (document.getElementById("jobsContainer") && document.getElementById("urlInput")) {
-        return;
+  function triggerToastForClipboardText(rawText) {
+    if (!clipboardPromptEnabled) {
+      return { ok: false, reason: "disabled" };
+    }
+    if (isRemoteDownloaderDashboard()) {
+      return { ok: false, reason: "dashboard" };
+    }
+
+    const text = (rawText || "").trim();
+    if (!text || text.length > MAX_COPY_TEXT_LENGTH) {
+      return { ok: false, reason: "empty" };
+    }
+
+    const now = Date.now();
+    if (text === lastPromptRawText && now - lastPromptAt < DUPLICATE_TOAST_COOLDOWN_MS) {
+      return { ok: true, reason: "deduped" };
+    }
+
+    const parsed = parseDownloadableClipboardText(text);
+    if (!parsed) {
+      return { ok: false, reason: "unsupported" };
+    }
+
+    lastPromptRawText = text;
+    lastPromptAt = now;
+    const shown = showClipboardDownloadToast(parsed, text);
+    return { ok: shown, reason: shown ? "shown" : "no_container" };
+  }
+
+  function clearClipboardCheckTimers() {
+    while (clipboardCheckTimers.length > 0) {
+      clearTimeout(clipboardCheckTimers.pop());
+    }
+  }
+
+  function requestBackgroundClipboardCheck() {
+    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
+    try {
+      chrome.runtime.sendMessage({ action: "checkClipboardNow" }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {}
+  }
+
+  function scheduleClipboardCheck() {
+    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
+    clearClipboardCheckTimers();
+    for (const delay of [80, 450, 1100]) {
+      const tid = setTimeout(() => {
+        requestBackgroundClipboardCheck();
+      }, delay);
+      clipboardCheckTimers.push(tid);
+    }
+  }
+
+  function onCopyEvent(event) {
+    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
+
+    scheduleClipboardCheck();
+
+    const rawText = getSelectedCopyText(event);
+    if (!rawText) return;
+
+    const parsed = parseDownloadableClipboardText(rawText);
+    if (!parsed) return;
+
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => {
+      copyTimer = null;
+      triggerToastForClipboardText(rawText);
+    }, 60);
+  }
+
+  function onClickEvent() {
+    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
+    scheduleClipboardCheck();
+  }
+
+  function onContextMenuEvent() {
+    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
+    scheduleClipboardCheck();
+  }
+
+  function onRuntimeMessage(request, _sender, sendResponse) {
+    if (!request || request.action !== "showClipboardToast") {
+      return false;
+    }
+    const result = triggerToastForClipboardText(request.rawText || "");
+    sendResponse(result);
+    return false;
+  }
+
+  document.addEventListener("copy", onCopyEvent, true);
+  document.addEventListener("click", onClickEvent, true);
+  document.addEventListener("contextmenu", onContextMenuEvent, true);
+
+  try {
+    if (chrome.runtime && chrome.runtime.onMessage) {
+      chrome.runtime.onMessage.addListener(onRuntimeMessage);
+    }
+  } catch (e) {}
+
+  window.__rdClipboardMonitorCleanup = () => {
+    document.removeEventListener("copy", onCopyEvent, true);
+    document.removeEventListener("click", onClickEvent, true);
+    document.removeEventListener("contextmenu", onContextMenuEvent, true);
+    try {
+      if (chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.removeListener(onStorageChanged);
       }
-
-      const rawText = getSelectedCopyText(event);
-      if (!rawText) return;
-
-      const parsed = parseDownloadableClipboardText(rawText);
-      if (!parsed) return;
-
-      const now = Date.now();
-      if (rawText === lastPromptRawText && now - lastPromptAt < 1200) {
-        return;
+    } catch (e) {}
+    try {
+      if (chrome.runtime && chrome.runtime.onMessage) {
+        chrome.runtime.onMessage.removeListener(onRuntimeMessage);
       }
-      lastPromptRawText = rawText;
-      lastPromptAt = now;
-
-      setTimeout(() => {
-        showClipboardDownloadToast(parsed, rawText);
-      }, 60);
-    },
-    true
-  );
+    } catch (e) {}
+    if (copyTimer) {
+      clearTimeout(copyTimer);
+      copyTimer = null;
+    }
+    clearClipboardCheckTimers();
+    removeToast();
+  };
 })();
