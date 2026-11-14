@@ -796,6 +796,8 @@ function getServiceTagClass(service) {
   if (lower.includes('mediafire')) return 'badge-mediafire';
   if (lower.includes('filekeeper')) return 'badge-filekeeper';
   if (lower.includes('datanodes')) return 'badge-datanodes';
+  if (lower.includes('buzzheavier') || lower.includes('bzzhr')) return 'badge-buzzheavier';
+  if (lower.includes('pixeldrain')) return 'badge-pixeldrain';
   if (lower.includes('rootz')) return 'badge-rootz';
   if (lower.includes('gdrive') || lower.includes('google drive') || lower.includes('google')) return 'badge-gdrive';
   return 'badge-direct';

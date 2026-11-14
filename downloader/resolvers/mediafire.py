@@ -173,7 +173,11 @@ class MediaFireResolver(BaseResolver):
                 "Referer": url,
                 "Accept": "*/*",
             }
-            head_cookies = session.cookies.get_dict() if not cookie_str else None
+            head_cookies = (
+                {k: v for k, v in session.cookies.get_dict().items() if v is not None}
+                if not cookie_str
+                else None
+            )
             head_resp = session.head(
                 download_url,
                 headers=head_headers,

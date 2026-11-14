@@ -472,7 +472,7 @@ class AutoResumeAndRetryTests(unittest.TestCase):
 
     def test_manager_jobs_truncation_preserves_active(self):
         """jobs.json 저장 시 최대 보관 개수를 초과해도 활성(downloading, queued) 작업은 제거되지 않는지 검증."""
-        from downloader.manager import DownloadManager, DownloadJob, MAX_JOBS_ENTRIES
+        from downloader.manager import DownloadManager, DownloadJob
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             dm = DownloadManager(

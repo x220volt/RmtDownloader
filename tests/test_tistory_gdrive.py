@@ -207,6 +207,7 @@ class TestTistoryGDriveResolution(unittest.TestCase):
             "https://drive.usercontent.google.com/download?id=181rXTkYGUye45FpYWVTsCMr7RcGNNpmh",
             "https://drive.google.com/uc?export=download&id=181rXTkYGUye45FpYWVTsCMr7RcGNNpmh",
         ]
+        assert gdrive_regex_match is not None
         raw_pat = gdrive_regex_match.group(1)[1:-1]
         compiled_pat = re.compile(raw_pat, re.I)
         for u in test_urls:

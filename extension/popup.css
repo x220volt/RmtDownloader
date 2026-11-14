@@ -590,6 +590,14 @@ body {
   background: rgba(59, 130, 246, 0.2);
   color: #60a5fa;
 }
+.tag-buzzheavier {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+.tag-pixeldrain {
+  background: rgba(139, 92, 246, 0.2);
+  color: #a78bfa;
+}
 .tag-rootz {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;

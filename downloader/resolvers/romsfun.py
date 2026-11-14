@@ -104,7 +104,7 @@ class RomsfunResolver(BaseResolver):
                         sub_links.append((full_a, a.get_text(strip=True)))
 
             if sub_links:
-                first_url, first_text = sub_links[0]
+                first_url, _first_text = sub_links[0]
                 logger.info(
                     f"[Romsfun] {len(sub_links)}개의 다운로드 버전 발견. 첫 번째 버전({first_url}) 해석 시작"
                 )

@@ -418,7 +418,8 @@ def get_guest_token(
                 timeout=(5, 10),
             )
         except requests.RequestException as e:
-            if getattr(e, "response", None) and e.response.status_code == 429:
+            err_resp = getattr(e, "response", None)
+            if err_resp is not None and err_resp.status_code == 429:
                 raise RuntimeError(
                     "GoFile API 요청 한도 초과 (Rate Limit / HTTP 429): GoFile 일시적 요청 제한이 적용 중입니다. "
                     "약 5~15분 후 다시 시도하거나, 설정에서 본인의 GoFile API 토큰(gofile_token) 또는 프록시(gofile_proxy)를 설정해 주세요."
@@ -535,9 +536,10 @@ class GofileResolver(BaseResolver):
         from ..url_helper import extract_service_password, get_candidate_passwords
 
         clean_u, extracted_pwd = extract_service_password(url, options)
-        content_id = parse_gofile_content_id(clean_u) or parse_gofile_content_id(url)
-        if not content_id:
+        raw_content_id = parse_gofile_content_id(clean_u) or parse_gofile_content_id(url)
+        if not raw_content_id:
             raise ValueError(f"유효한 GoFile 공유 링크가 아닙니다: {url}")
+        content_id: str = raw_content_id
 
         options = options or {}
         configured_token = options.get("gofile_token", "").strip()
@@ -614,10 +616,8 @@ class GofileResolver(BaseResolver):
                             timeout=(5, 15),
                         )
                     except requests.RequestException as e:
-                        if (
-                            getattr(e, "response", None)
-                            and e.response.status_code == 429
-                        ):
+                        err_resp = getattr(e, "response", None)
+                        if err_resp is not None and err_resp.status_code == 429:
                             raise RuntimeError(
                                 "GoFile API 요청 한도 초과 (Rate Limit / HTTP 429): GoFile 일시적 요청 제한이 적용 중입니다. "
                                 "약 5~15분 후 다시 시도하거나, 설정에서 본인의 GoFile API 토큰(gofile_token) 또는 프록시(gofile_proxy)를 설정해 주세요."
@@ -708,7 +708,7 @@ class GofileResolver(BaseResolver):
                         current_pwd = next_pwd
                         tried_pwds.append(current_pwd)
                         payload = _fetch_contents(content_id, current_pwd)
-                        is_pwd_protected, pwd_status = _check_password_status(payload)
+                        is_pwd_protected, _pwd_status = _check_password_status(payload)
                         if not is_pwd_protected:
                             logger.info(f"GoFile {next_desc} 인증 성공: {content_id}")
                             break

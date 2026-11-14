@@ -761,48 +761,37 @@ class WebPageResolver(BaseResolver):
                 pass
 
         # 4. Kone.gg SSR 바이너리 데이터 (api.kone.gg/v1/article/get) 확인
-        ssr_script = soup.find(
-            "script", attrs={"data-url": re.compile(r"api\.kone\.gg/v1/article/get")}
-        )
-        if ssr_script and ssr_script.text:
-            try:
-                import base64 as _b64
+        from ..kone_watcher import extract_kone_ssr_strings_from_soup
 
-                from ..kone_watcher import extract_kone_ssr_strings
-
-                ssr_data = json.loads(ssr_script.text)
-                b64_body = ssr_data.get("body", "")
-                if b64_body:
-                    raw_bytes = _b64.b64decode(b64_body)
-                    ssr_text = "\n".join(extract_kone_ssr_strings(raw_bytes))
-                    ssr_pwd_m = PASSWORD_REGEX.search(ssr_text)
-                    ssr_pwd = ssr_pwd_m.group(1).strip() if ssr_pwd_m else ""
-                    for sc in parse_download_candidates(
-                        raw_text=ssr_text, single_referer=page_url
-                    ):
-                        sc_url = sc.get("url", "")
-                        sc_opts = sc.get("options") or {}
-                        sc_pwd = sc_opts.get("password") or ssr_pwd
-                        if _is_cloud_service_url(sc_url):
-                            _add_candidate(
-                                cloud_candidates,
-                                sc_url,
-                                name=sc.get("name", ""),
-                                pwd=sc_pwd,
-                                extra_opts=sc_opts,
-                            )
-                        elif _has_downloadable_extension(
-                            sc_url
-                        ) and not _is_image_url_or_name(sc_url):
-                            _add_candidate(
-                                direct_file_candidates,
-                                sc_url,
-                                name=sc.get("name", ""),
-                                pwd=sc_pwd,
-                                extra_opts=sc_opts,
-                            )
-            except Exception:
-                pass
+        ssr_strings = extract_kone_ssr_strings_from_soup(soup)
+        if ssr_strings:
+            ssr_text = "\n".join(ssr_strings)
+            ssr_pwd_m = PASSWORD_REGEX.search(ssr_text)
+            ssr_pwd = ssr_pwd_m.group(1).strip() if ssr_pwd_m else ""
+            for sc in parse_download_candidates(
+                raw_text=ssr_text, single_referer=page_url
+            ):
+                sc_url = sc.get("url", "")
+                sc_opts = sc.get("options") or {}
+                sc_pwd = sc_opts.get("password") or ssr_pwd
+                if _is_cloud_service_url(sc_url):
+                    _add_candidate(
+                        cloud_candidates,
+                        sc_url,
+                        name=sc.get("name", ""),
+                        pwd=sc_pwd,
+                        extra_opts=sc_opts,
+                    )
+                elif _has_downloadable_extension(
+                    sc_url
+                ) and not _is_image_url_or_name(sc_url):
+                    _add_candidate(
+                        direct_file_candidates,
+                        sc_url,
+                        name=sc.get("name", ""),
+                        pwd=sc_pwd,
+                        extra_opts=sc_opts,
+                    )
 
         return post_title, cloud_candidates + direct_file_candidates
 

@@ -77,11 +77,9 @@ class VimmResolver(BaseResolver):
 
         with stealth_browser_session(prefix="vimm_session_") as page:
             page.get(url)
-            found_form = False
             for _ in range(20):
                 # Cloudflare Turnstile 통과 및 #dl-form 탐지 대기
                 if page.ele("#dl-form"):
-                    found_form = True
                     break
                 html_snippet = (page.html or "").lower()
                 if any(term in html_snippet for term in ("unavailable", "removed", "esa request")):

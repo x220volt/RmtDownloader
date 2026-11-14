@@ -1,13 +1,14 @@
 """Shared HTTP engine selection and request options, independent of queue management."""
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
 class HttpTransferPolicy:
-    request_kwargs: dict
+    request_kwargs: dict[str, Any]
     method: str
-    post_data: object
+    post_data: Any
     chunk_size: int
     split: int
     use_aria2: bool
@@ -50,7 +51,7 @@ class HttpTransferPolicy:
         )
 
     @property
-    def standard_kwargs(self):
+    def standard_kwargs(self) -> dict[str, Any]:
         return dict(
             self.request_kwargs,
             method=self.method,

@@ -51,7 +51,9 @@ class TransferPolicyTests(unittest.TestCase):
             service_name="unknown",
             options={"mega_file_id": "id", "mega_key_a32": [1, 2, 3, 4]},
         )
-        self.assertEqual(addon_registry.find_task_addon(job).addon_id, "mega")
+        addon = addon_registry.find_task_addon(job)
+        assert addon is not None
+        self.assertEqual(addon.addon_id, "mega")
 
 
 class TransferIOTests(unittest.TestCase):

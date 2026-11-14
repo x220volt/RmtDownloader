@@ -433,9 +433,9 @@ class TistoryResolver(BaseResolver):
                             resolved_first.setdefault("source_page_url", clean_url)
                             resolved_first.setdefault("article_title", post_title)
                             resolved_first.setdefault("subfolder", post_title)
+                            resolved_fn = resolved_first.get("filename")
                             if cand.get("name") and (
-                                not resolved_first.get("filename")
-                                or resolved_first.get("filename").startswith("gdrive_")
+                                not resolved_fn or resolved_fn.startswith("gdrive_")
                             ):
                                 resolved_first["filename"] = cand["name"]
                         except Exception as e:

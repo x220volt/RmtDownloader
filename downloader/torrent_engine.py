@@ -36,21 +36,27 @@ def bdecode(data: bytes):
             if end > len(data):
                 raise ValueError("Truncated bencoded string")
             return data[colon + 1:end], end
-        if token in (b"l", b"d"):
+        if token == b"l":
             idx += 1
-            result = [] if token == b"l" else {}
+            lst: list = []
+            while idx < len(data) and data[idx:idx + 1] != b"e":
+                item, idx = decode_item(idx, depth + 1)
+                lst.append(item)
+            if idx >= len(data):
+                raise ValueError("Unterminated bencoded list")
+            return lst, idx + 1
+        if token == b"d":
+            idx += 1
+            dct: dict = {}
             while idx < len(data) and data[idx:idx + 1] != b"e":
                 key, idx = decode_item(idx, depth + 1)
-                if token == b"l":
-                    result.append(key)
-                else:
-                    if not isinstance(key, bytes) or key in result:
-                        raise ValueError("Invalid or duplicate bencoded dictionary key")
-                    value, idx = decode_item(idx, depth + 1)
-                    result[key] = value
+                if not isinstance(key, bytes) or key in dct:
+                    raise ValueError("Invalid or duplicate bencoded dictionary key")
+                value, idx = decode_item(idx, depth + 1)
+                dct[key] = value
             if idx >= len(data):
-                raise ValueError("Unterminated bencoded container")
-            return result, idx + 1
+                raise ValueError("Unterminated bencoded dictionary")
+            return dct, idx + 1
         raise ValueError("Unknown bencode type")
 
     result, end = decode_item(0)

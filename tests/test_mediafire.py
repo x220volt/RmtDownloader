@@ -102,7 +102,7 @@ class MediaFireResolverTests(unittest.TestCase):
 
     def test_addon_registration(self):
         addon = addon_registry.find_for_url("https://www.mediafire.com/file/fytn4diqt1d7tuq/sample.pkg/file")
-        self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.addon_id, "mediafire")
         self.assertEqual(addon.name, "MediaFire")
 

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.58') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.59') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.58') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.59') }}</p>
         </div>
       </div>
 
@@ -423,7 +423,7 @@
               </p>
               <div class="settings-update-row">
                 <div class="settings-update-vers">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.58') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.59') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -896,6 +896,12 @@
                   <span class="badge badge-romspure" style="background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3);">Romspure (romspure.cc)</span>
                   <span class="badge badge-wowroms" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">WoWroms (wowroms.com)</span>
                   <span class="badge badge-planetemu" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">PlanetEmu (planetemu.net)</span>
+                  <span class="badge badge-vimm" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">Vimm's Lair (vimm.net)</span>
+                  <span class="badge badge-pixeldrain" style="background: rgba(139, 92, 246, 0.15); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.3);">Pixeldrain (pixeldrain.com)</span>
+                  <span class="badge badge-mediafire" style="background: rgba(0, 114, 255, 0.15); color: #38bdf8; border: 1px solid rgba(0, 114, 255, 0.3);">MediaFire (mediafire.com)</span>
+                  <span class="badge badge-filekeeper" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">FileKeeper (filekeeper.net)</span>
+                  <span class="badge badge-datanodes" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">DataNodes (datanodes.to)</span>
+                  <span class="badge badge-buzzheavier" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">Buzzheavier (buzzheavier.com / bzzhr.to)</span>
                   <span class="badge badge-rootz" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Rootz (rootz.so)</span>
                 </div>
               </div>
@@ -934,6 +940,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.58') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.59') }}"></script>
 </body>
 </html>

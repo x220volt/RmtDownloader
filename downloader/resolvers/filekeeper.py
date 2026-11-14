@@ -184,13 +184,7 @@ class FileKeeperResolver(BaseResolver):
                                 allow_redirects=False,
                                 timeout=REQUEST_TIMEOUT,
                             )
-                            if (
-                                post_resp.status_code in (301, 302, 303, 307, 308)
-                                and "Location" in post_resp.headers
-                            ):
-                                direct_url = post_resp.headers["Location"]
-                                break
-                            elif "Location" in post_resp.headers:
+                            if "Location" in post_resp.headers:
                                 direct_url = post_resp.headers["Location"]
                                 break
                             else:
@@ -297,10 +291,14 @@ class FileKeeperResolver(BaseResolver):
                 "Referer": "https://filekeeper.net/",
                 "Accept": "*/*",
             }
+            raw_head_cookies = cookie_dict or session.cookies.get_dict()
+            head_cookies = {
+                k: v for k, v in raw_head_cookies.items() if v is not None
+            }
             head_resp = session.head(
                 direct_url,
                 headers=head_headers,
-                cookies=cookie_dict or session.cookies.get_dict(),
+                cookies=head_cookies,
                 timeout=10,
                 allow_redirects=True,
             )

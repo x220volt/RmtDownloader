@@ -111,7 +111,7 @@ class BuzzheavierResolverTests(unittest.TestCase):
 
     def test_addon_registration(self):
         addon = addon_registry.get_addon("buzzheavier")
-        self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.name, "Buzzheavier")
         self.assertIn("buzzheavier.com", addon.domains)
         self.assertIn("bzzhr.to", addon.domains)

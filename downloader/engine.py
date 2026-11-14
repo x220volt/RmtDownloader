@@ -7,7 +7,8 @@ import os
 import re
 import threading
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import requests
@@ -67,7 +68,7 @@ def fix_mojibake(text: str) -> str:
 
 def sanitize_filename(name: str) -> str:
     """원격 파일명을 안전한 로컬 파일명으로 정제합니다."""
-    name = fix_mojibake((name or "")).replace("\\", "/").rsplit("/", 1)[-1]
+    name = fix_mojibake(name or "").replace("\\", "/").rsplit("/", 1)[-1]
     raw = re.sub(r"\s+", " ", (name or ""))
     cleaned = _INVALID_FILENAME_CHARS.sub("_", raw).strip().rstrip(". ")
     if not cleaned or cleaned in (".", ".."):
@@ -467,6 +468,7 @@ class DownloadTask:
                     ct, is_explicit_html = _validate_file_response(
                         resp, self.url, self.filename
                     )
+                    content_range = None
                     if is_partial:
                         content_range = _parse_content_range(resp.headers.get("Content-Range", ""))
                         if not content_range or content_range[2] is None:
@@ -499,7 +501,9 @@ class DownloadTask:
                     # 4. 스트리밍 다운로드 루프
                     response_bytes = 0
                     response_limit = (
-                        content_range[1] - content_range[0] + 1 if is_partial else total_bytes
+                        content_range[1] - content_range[0] + 1
+                        if is_partial and content_range is not None
+                        else total_bytes
                     )
                     last_report_time = time.time()
                     speed_calc_start = last_report_time

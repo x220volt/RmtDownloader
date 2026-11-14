@@ -52,7 +52,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ConnectionError, OSError):
             pass
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args) -> None:
         pass
 
 

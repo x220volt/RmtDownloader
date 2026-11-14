@@ -114,7 +114,7 @@ class VimmResolverTests(unittest.TestCase):
 
     def test_addon_registration(self):
         addon = addon_registry.find_for_url("https://vimm.net/vault/1191")
-        self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.addon_id, "vimm")
         self.assertEqual(addon.name, "Vimm's Lair")
 

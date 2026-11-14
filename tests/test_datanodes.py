@@ -118,7 +118,7 @@ class DataNodesResolverTests(unittest.TestCase):
 
     def test_addon_registration(self):
         addon = addon_registry.find_for_url("https://datanodes.to/q7cltl21j7cl/HYAOI_NUP.part1.rar")
-        self.assertIsNotNone(addon)
+        assert addon is not None
         self.assertEqual(addon.addon_id, "datanodes")
         self.assertEqual(addon.name, "DataNodes")
 

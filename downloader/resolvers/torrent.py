@@ -107,15 +107,13 @@ class TorrentResolver(BaseResolver):
             resp = requests.get(url, headers=headers, timeout=20)
             resp.raise_for_status()
 
-            temp_torrent = tempfile.NamedTemporaryFile(
+            with tempfile.NamedTemporaryFile(
                 dir=str(TORRENTS_CACHE_DIR),
                 suffix=".torrent",
                 delete=False,
-            )
-            temp_torrent.write(resp.content)
-            temp_torrent.close()
-
-            local_torrent_path = temp_torrent.name
+            ) as temp_torrent:
+                temp_torrent.write(resp.content)
+                local_torrent_path = temp_torrent.name
             try:
                 info = parse_torrent_file(local_torrent_path)
                 filename = (

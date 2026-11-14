@@ -86,6 +86,25 @@ def extract_kone_ssr_strings(raw_bytes: bytes) -> list[str]:
     return strings
 
 
+def extract_kone_ssr_strings_from_soup(soup) -> list[str]:
+    """BeautifulSoup 객체에서 Kone.gg SSR JSON 스크립트를 찾아 문자열 목록을 추출한다."""
+    ssr_script = soup.find(
+        "script", attrs={"data-url": re.compile(r"api\.kone\.gg/v1/article/get")}
+    )
+    if not (ssr_script and ssr_script.text):
+        return []
+    try:
+        data = json.loads(ssr_script.text)
+        b64_body = data.get("body", "")
+        if not b64_body:
+            return []
+        raw_bytes = base64.b64decode(b64_body)
+        return extract_kone_ssr_strings(raw_bytes)
+    except Exception as e:
+        logger.debug("SSR JSON 파싱 실패: %s", e)
+        return []
+
+
 class KoneWatcher:
     """Kone.gg 게시판을 주기적으로 모니터링하여 새 글의 다운로드 링크를 자동 추가하는 워처."""
 
@@ -1088,18 +1107,7 @@ class KoneWatcher:
         texts_to_scan: list[str] = []
 
         # 1. SvelteKit SSR JSON 데이터 스크립트 탐색 (https://api.kone.gg/v1/article/get)
-        ssr_script = soup.find(
-            "script", attrs={"data-url": re.compile(r"api\.kone\.gg/v1/article/get")}
-        )
-        if ssr_script and ssr_script.text:
-            try:
-                data = json.loads(ssr_script.text)
-                b64_body = data.get("body", "")
-                if b64_body:
-                    raw_bytes = base64.b64decode(b64_body)
-                    texts_to_scan.extend(extract_kone_ssr_strings(raw_bytes))
-            except Exception as e:
-                logger.debug("SSR JSON 파싱 실패: %s", e)
+        texts_to_scan.extend(extract_kone_ssr_strings_from_soup(soup))
 
         # 2. HTML 텍스트 전체
         texts_to_scan.append(soup.get_text("\n"))

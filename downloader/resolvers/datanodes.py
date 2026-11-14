@@ -7,7 +7,6 @@ from typing import Optional
 from urllib.parse import unquote, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 
 from ..browser_solver import stealth_browser_session
 from ..engine import extract_filename_from_headers, sanitize_filename, sanitize_folder_name
@@ -165,14 +164,12 @@ class DataNodesResolver(BaseResolver):
             )
 
             # Turnstile 캡차 풀이 대기 (최대 20초)
-            ts_token = ""
             for _ in range(20):
                 try:
                     ts_val = page.run_js(
                         "return document.querySelector('[name=\"cf-turnstile-response\"]')?.value || '';"
                     )
                     if ts_val:
-                        ts_token = ts_val
                         break
                 except Exception:
                     pass

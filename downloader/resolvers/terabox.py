@@ -284,6 +284,7 @@ class TeraBoxResolver(BaseResolver):
                 verify_url = f"https://{parsed_final.netloc}/share/verify?surl={surl}"
                 tried = []
                 last_err = None
+                verify_data: dict = {}
                 for idx, cand in enumerate(pwd_candidates, 1):
                     tried.append(cand)
                     logger.info(

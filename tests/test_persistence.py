@@ -3,7 +3,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 from downloader.manager import DownloadJob, DownloadManager
 
@@ -197,15 +197,9 @@ class TestJobPersistence(unittest.TestCase):
         """Linux/Docker 환경(os.name != 'nt')에서 Windows 경로가 설정되어 있을 때 NameError 없이 자동 보정되는지 검증."""
         import config
 
-        dummy_settings = {
-            "download_dir": r"C:\Users\User\Downloads",
-            "host": "0.0.0.0",
-            "port": 7971,
-        }
-
         with (
             patch.object(config, "os") as mock_os,
-            patch("builtins.open", unittest.mock.mock_open(read_data='{"download_dir": "C:\\\\Users\\\\User\\\\Downloads"}')),
+            patch("builtins.open", mock_open(read_data='{"download_dir": "C:\\\\Users\\\\User\\\\Downloads"}')),
             patch.object(config.Path, "exists", return_value=True),
         ):
             mock_os.name = "posix"
@@ -227,7 +221,7 @@ class TestJobPersistence(unittest.TestCase):
         with (
             patch.object(sys, "platform", "linux"),
             patch.dict("sys.modules", {"fcntl": mock_fcntl}),
-            patch("builtins.open", unittest.mock.mock_open()),
+            patch("builtins.open", mock_open()),
             patch.object(app, "CONFIG_DIR", mock_config_dir),
         ):
             app.ensure_single_instance()

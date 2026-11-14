@@ -693,17 +693,6 @@ def quick_add():
         ), 400
 
     try:
-        job_options = {}
-        if pwd:
-            job_options["password"] = pwd
-        if terabox_mode:
-            job_options["terabox_mode"] = terabox_mode
-        candidates = parse_download_candidates(
-            raw_text=str(raw_target_url),
-            single_referer=referer,
-            single_password=pwd,
-            single_terabox_mode=terabox_mode,
-        )
         if capture_page is not None:
             for c in candidates:
                 c.setdefault("options", {})["capture_page"] = capture_page
@@ -933,7 +922,7 @@ def _find_extension_in_browser_preferences() -> Optional[Path]:
                     try:
                         pref_data = json.loads(pref_path.read_text(encoding="utf-8", errors="ignore"))
                         settings_dict = pref_data.get("extensions", {}).get("settings", {})
-                        for _ext_id, ext_info in settings_dict.items():
+                        for ext_info in settings_dict.values():
                             p_val = ext_info.get("path")
                             if not p_val or not isinstance(p_val, str):
                                 continue
@@ -1170,7 +1159,7 @@ def is_newer_version(current_ver: Optional[str], target_ver: Optional[str]) -> b
     """SemVer 버전 비교 (예: 'v0.1.34' vs 'v0.1.35'). target_ver가 더 크면 True."""
     if not target_ver:
         return False
-    c_clean = re.sub(r"^[vV]", "", str(current_ver or "").strip())
+    c_clean = re.sub(r"^[vV]", "", (current_ver or "").strip())
     t_clean = re.sub(r"^[vV]", "", target_ver.strip())
     if not t_clean or c_clean == t_clean:
         return False
@@ -1851,11 +1840,17 @@ def ensure_single_instance():
         except Exception:
             lock_dir = Path.home()
         lock_path = lock_dir / ".remote_downloader.lock"
+        f = None
         try:
-            f = open(lock_path, "w")
+            f = open(lock_path, "w", encoding="utf-8")
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             _single_instance_lock = f
         except (BlockingIOError, OSError) as lock_err:
+            if f is not None:
+                try:
+                    f.close()
+                except OSError:
+                    pass
             if isinstance(lock_err, BlockingIOError) or getattr(lock_err, "errno", None) in (11, 35):
                 print("\n⚠️ [경고] 원격 다운로더가 이미 실행 중입니다. 중복 프로세스를 종료합니다.\n")
                 sys.exit(1)

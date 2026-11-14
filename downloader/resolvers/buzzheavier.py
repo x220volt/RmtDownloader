@@ -4,7 +4,7 @@ import logging
 import re
 import time
 from typing import Optional
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -88,10 +88,6 @@ class BuzzheavierResolver(BaseResolver):
             }
 
         logger.info(f"[Buzzheavier] 파일 상세 페이지 분석 시작: {url}")
-
-        path_parts = [p for p in (parsed.path or "").split("/") if p]
-        file_code_hint = path_parts[0] if path_parts else ""
-        filename_hint: Optional[str] = None
 
         req_headers = {
             "User-Agent": USER_AGENT,

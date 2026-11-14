@@ -4,6 +4,21 @@
 
 ---
 
+## [v0.1.59] - 2026-11-14
+
+### 🛠 전체 코드베이스 리팩토링, 정적 타입 안정성 강화 및 지원 플랫폼 UI 동기화
+* **다운로드 매니저(`DownloadManager._worker_loop`) 모듈화 및 클로저 캡처 버그 수정 (`downloader/manager.py`)**:
+  * 약 600줄의 워커 루프를 역할별 헬퍼 메서드(`_make_progress_callback`, `_make_status_callback`, `_apply_subfolder_and_capture`, `_enqueue_extra_items`, `_build_download_task`, `_try_webpage_fallback`, `_schedule_job_retry`, `_finalize_job_result`, `_sync_job_progress_from_part`)로 분리하고 루프 변수 클로저 캡처 이슈(`B023`) 전량 해결.
+* **중복 로직 제거 및 리소스 누수 방지 (`app.py`, `downloader/kone_watcher.py`, `downloader/resolvers/webpage.py`, `downloader/resolvers/torrent.py`)**:
+  * Kone.gg SSR 바이너리 추출 로직을 `extract_kone_ssr_strings_from_soup()` 헬퍼로 통합.
+  * `quick_add()` 중복 후보 파싱 제거, `NamedTemporaryFile` 컨텍스트 매니저 적용 및 단일 인스턴스 락 예외 처리 시 파일 핸들 누수 방지.
+* **정적 타입 검사(Pyright / Pyrefly) 오류 전량 해결 (`downloader/transfer_policy.py`, `downloader/engine.py`, `downloader/torrent_engine.py`, `downloader/resolvers/*`)**:
+  * `HttpTransferPolicy.standard_kwargs` 타입 명시, bencode 리스트/딕셔너리 디코더 분기 분리, 쿠키/헤더 `None` 안전성 강화로 Pyright/Pyrefly 진단 `0 errors` 달성.
+* **지원 플랫폼 안내 UI·확장 프로그램·문서 동기화 (`templates/index.html`, `static/css/style.css`, `static/js/app.js`, `extension/popup.js`, `extension/popup.css`, `README.md`)**:
+  * 설정 ➔ 지원 플랫폼 안내 탭, 확장 프로그램 스캐너/태그, `README.md`에 `Vimm's Lair`, `Pixeldrain`, `MediaFire`, `FileKeeper`, `DataNodes`, `Buzzheavier` 배지 및 매핑 추가.
+
+---
+
 ## [v0.1.58] - 2026-11-11
 
 ### 🩹 HTML 첨부파일 다운로드 허용 및 Kone.gg 직접 링크 해석 안정화
