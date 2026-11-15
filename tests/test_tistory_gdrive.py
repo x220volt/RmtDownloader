@@ -213,6 +213,85 @@ class TestTistoryGDriveResolution(unittest.TestCase):
         for u in test_urls:
             self.assertTrue(compiled_pat.search(u), f"Regex failed to match: {u}")
 
+    @patch("downloader.resolvers.tistory.requests.Session")
+    def test_tistory_fileblock_kakaocdn_dna_split_archive_filenames(
+        self, mock_session_cls
+    ):
+        dna_url_1 = (
+            "https://blog.kakaocdn.net/dna/KLq5Z/btsDAvIlpFB/"
+            "AAAAAAAAAAAAAAAAAAAAAGCPvB3xxG4CkxaUCdHR8gKaN_jSCCXrLQnh3sQg7FW5/"
+            "Sly%20Cooper%20and%20the%20Thievius%20Raccoonus.7z.001"
+            "?credential=abc&expires=1796050799&signature=sig1&attach=1&knm=tfile.001"
+        )
+        dna_url_65 = (
+            "https://blog.kakaocdn.net/dna/XYZ99/btsDB999999/"
+            "AAAAAAAAAAAAAAAAAAAAAGCPvB3xxG4CkxaUCdHR8gKaN_jSCCXrLQnh3sQg7FW5/"
+            "Sly%20Cooper%20and%20the%20Thievius%20Raccoonus.7z.065"
+            "?credential=abc&expires=1796050799&signature=sig65&attach=1&knm=tfile.065"
+        )
+        mock_html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta property="og:title" content="슬라이 쿠퍼 1 (Sly Cooper)">
+</head>
+<body>
+    <div class="contents_style">
+        <figure class="fileblock" data-ke-align="alignCenter">
+            <a class="" href="{dna_url_1}">
+                <div class="image"></div>
+                <div class="desc">
+                    <div class="filename"><span class="name">Sly Cooper and the Thievius Raccoonus.7z.001</span></div>
+                    <div class="size">19.53MB</div>
+                </div>
+            </a>
+        </figure>
+        <figure class="fileblock" data-ke-align="alignCenter">
+            <a class="" href="{dna_url_65}">
+                <div class="image"></div>
+                <div class="desc">
+                    <div class="filename"><span class="name">Sly Cooper and the Thievius Raccoonus.7z.065</span></div>
+                    <div class="size">11.86MB</div>
+                </div>
+            </a>
+        </figure>
+    </div>
+</body>
+</html>"""
+        mock_resp = MagicMock()
+        mock_resp.text = mock_html
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+
+        self.assertTrue(self.tistory_resolver.can_handle(dna_url_1))
+        self.assertTrue(self.tistory_resolver.is_direct_attachment_url(dna_url_1))
+
+        res = self.tistory_resolver.resolve("https://fpwjemkula.tistory.com/125")
+        self.assertEqual(res["source_service"], "Tistory")
+        self.assertEqual(
+            res["filename"], "Sly Cooper and the Thievius Raccoonus.7z.001"
+        )
+        self.assertEqual(len(res["files"]), 2)
+        self.assertEqual(
+            res["files"][0]["name"],
+            "Sly Cooper and the Thievius Raccoonus.7z.001",
+        )
+        self.assertEqual(
+            res["files"][1]["name"],
+            "Sly Cooper and the Thievius Raccoonus.7z.065",
+        )
+
+        # Direct resolution of a Kakao CDN /dna/ URL should keep the real path filename, not knm=tfile.001
+        direct_res = self.tistory_resolver.resolve(dna_url_1)
+        self.assertEqual(direct_res["source_service"], "Tistory")
+        self.assertEqual(
+            direct_res["filename"],
+            "Sly Cooper and the Thievius Raccoonus.7z.001",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

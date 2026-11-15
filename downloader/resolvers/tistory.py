@@ -3,10 +3,12 @@
 import logging
 import mimetypes
 import re
+from typing import Any
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import NavigableString
 
 from ..engine import _MIME_MAP, DEFAULT_USER_AGENT
 from .base import BaseResolver
@@ -16,11 +18,96 @@ logger = logging.getLogger(__name__)
 
 # 첨부파일 직링크 URL 패턴
 _ATTACH_URL_PATTERN = re.compile(
-    r"(?:daumcdn\.net/(?:cfile|tfile)/|blog\.kakaocdn\.net/dn/|/attachment/|cfile\d+\.uf\.(?:tistory|daum)\.net/)"
+    r"(?:daumcdn\.net/(?:cfile|tfile)/|(?:blog\.)?kakaocdn\.net/dna?/|/attachment/|cfile\d+\.uf\.(?:tistory|daum)\.net/)"
 )
 
 # 이미지 확장자 (첨부파일이 아닌 본문 뷰어/라이트박스 필터링용)
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
+
+# 파일명 끝에 용량 배지 문자열(예: 19.53MB, 11.86MB)이 붙어 있는 경우 정리
+_TRAILING_FILESIZE_RE = re.compile(
+    r"(\.[a-zA-Z0-9]{1,8}(?:\.\d{3})?)(?:\s*\d+(?:\.\d+)?\s*[KMGTPE]i?B|\s+\d+(?:\.\d+)?\s*B)$",
+    re.I,
+)
+
+
+def _strip_trailing_filesize(text: str) -> str:
+    """파일명 뒤에 잘못 결합된 용량 문자열(예: .7z.06511.86MB -> .7z.065)을 제거합니다."""
+    cleaned = re.sub(r"\s+", " ", (text or "")).strip()
+    if not cleaned:
+        return ""
+    return _TRAILING_FILESIZE_RE.sub(r"\1", cleaned).strip()
+
+
+def _text_excluding_size(node: Any) -> str:
+    """요소 내부 텍스트 중 .size / .file-size 등 용량 배지 요소를 제외한 순수 텍스트를 추출합니다."""
+    if node is None:
+        return ""
+    parts: list[str] = []
+    for desc in node.descendants:
+        if not isinstance(desc, NavigableString):
+            continue
+        in_size = False
+        parent = desc.parent
+        while parent is not None and parent is not node:
+            classes = parent.get("class") or []
+            if any("size" in str(c).lower() for c in classes):
+                in_size = True
+                break
+            parent = parent.parent
+        if not in_size:
+            parts.append(str(desc))
+    return _strip_trailing_filesize("".join(parts))
+
+
+def _extract_clean_link_filename(a_tag: Any, parent_fig: Any = None) -> str:
+    """티스토리 첨부파일 <a> 및 부모 컨테이너에서 용량 문자열 없이 순수 파일명을 추출합니다."""
+    for attr_name in ("download", "data-ke-file-name", "data-filename"):
+        attr_val = a_tag.get(attr_name)
+        if isinstance(attr_val, str) and attr_val.strip():
+            return _strip_trailing_filesize(attr_val)
+
+    containers = [c for c in (a_tag, parent_fig) if c is not None]
+    selectors = (
+        ".filename .name",
+        "span.name",
+        ".se-file-name",
+        ".file_name",
+        ".filename",
+        ".name",
+    )
+    for container in containers:
+        for sel in selectors:
+            el = container.select_one(sel)
+            if el is not None:
+                candidate = _text_excluding_size(el)
+                if candidate:
+                    return candidate
+
+    raw_a = _text_excluding_size(a_tag)
+    if raw_a and not raw_a.startswith(("http://", "https://")):
+        return raw_a
+
+    if parent_fig is not None:
+        raw_fig = _text_excluding_size(parent_fig)
+        if raw_fig and not raw_fig.startswith(("http://", "https://")):
+            return raw_fig
+
+    return ""
+
+
+def _extract_filename_from_url(url_str: str) -> str:
+    """URL 경로(실제 파일명) 또는 knm 쿼리 파라미터에서 파일명을 추출합니다."""
+    parsed_u = urlparse(url_str)
+    base = unquote(parsed_u.path.split("/")[-1]).strip()
+    if base and "." in base and not base.lower().startswith("tfile."):
+        return base
+    qs = parse_qs(parsed_u.query)
+    if "knm" in qs and qs["knm"]:
+        knm_val = unquote(qs["knm"][0].strip())
+        if knm_val:
+            return knm_val
+    return base if base and "." in base else ""
 
 
 def _extract_filename_from_fragment(fragment: str) -> str:
@@ -60,8 +147,10 @@ class TistoryResolver(BaseResolver):
         ):
             return True
 
-        # 3. 카카오 CDN 파일 링크 (blog.kakaocdn.net/dn/)
-        if host == "blog.kakaocdn.net" and p.path.startswith("/dn/"):
+        # 3. 카카오 CDN 파일 링크 (*.kakaocdn.net/dn/ 또는 /dna/)
+        if (
+            host == "blog.kakaocdn.net" or host.endswith(".kakaocdn.net")
+        ) and p.path.startswith(("/dn/", "/dna/")):
             return True
 
         # 4. 구형 cfile 서버 (cfile*.uf.tistory.com, cfile*.uf.daum.net)
@@ -80,7 +169,9 @@ class TistoryResolver(BaseResolver):
             "/cfile/" in p.path or "/tfile/" in p.path
         ):
             return True
-        if host == "blog.kakaocdn.net" and p.path.startswith("/dn/"):
+        if (
+            host == "blog.kakaocdn.net" or host.endswith(".kakaocdn.net")
+        ) and p.path.startswith(("/dn/", "/dna/")):
             return True
         if host.startswith("cfile") and (
             host.endswith(".tistory.com") or host.endswith(".daum.net")
@@ -111,59 +202,66 @@ class TistoryResolver(BaseResolver):
             if self.is_direct_attachment_url(clean_url):
                 filename = frag_filename or options.get("filename") or ""
 
-                # 쿼리 파라미터에서 파일명 확인 (예: knm=...)
+                # URL 패스(실제 파일명) 우선 추출 후 knm 파라미터 폴백
                 if not filename:
-                    qs = parse_qs(p.query)
-                    if "knm" in qs and qs["knm"]:
-                        filename = unquote(qs["knm"][0].strip())
+                    filename = _extract_filename_from_url(clean_url)
 
-                # 패스에서 파일명 확인 (확장자가 있는 경우)
-                if not filename:
-                    base = unquote(p.path.split("/")[-1])
-                    if base and "." in base:
-                        filename = base
-
-                # 파일명이 없거나 확장자가 없는 경우 HEAD 요청으로 Content-Disposition 또는 Content-Type 확인
+                # 파일명이 없거나 확장자가 없는 경우 HEAD(미지원/404 시 GET)로 메타데이터 확인
                 if not filename or "." not in filename:
                     try:
                         head_resp = session.head(
                             clean_url, timeout=10, allow_redirects=True
                         )
-                        cd = head_resp.headers.get("Content-Disposition", "")
-                        if "filename=" in cd or "filename*=" in cd:
-                            m_star = re.search(
-                                r"filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)", cd
+                        if head_resp.status_code in (404, 405, 501):
+                            head_resp.close()
+                            head_resp = session.get(
+                                clean_url,
+                                timeout=10,
+                                allow_redirects=True,
+                                stream=True,
                             )
-                            if m_star:
-                                filename = unquote(m_star.group(1).strip().strip("\"'"))
-                            else:
-                                m_std = re.search(
-                                    r'filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\s]+)',
-                                    cd,
+                        try:
+                            cd = head_resp.headers.get("Content-Disposition", "")
+                            if "filename=" in cd or "filename*=" in cd:
+                                m_star = re.search(
+                                    r"filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)", cd
                                 )
-                                if m_std:
-                                    raw_fn = m_std.group(1) or m_std.group(2)
-                                    filename = unquote(raw_fn.strip().strip("\"'"))
+                                if m_star:
+                                    filename = unquote(
+                                        m_star.group(1).strip().strip("\"'")
+                                    )
+                                else:
+                                    m_std = re.search(
+                                        r'filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\s]+)',
+                                        cd,
+                                    )
+                                    if m_std:
+                                        raw_fn = m_std.group(1) or m_std.group(2)
+                                        filename = unquote(raw_fn.strip().strip("\"'"))
 
-                        # Content-Disposition이 없으면 Content-Type을 통해 확장자 보완
-                        if not filename or "." not in filename:
-                            ct = (
-                                head_resp.headers.get("Content-Type", "")
-                                .split(";")[0]
-                                .strip()
-                                .lower()
-                            )
-                            ext = (
-                                _MIME_MAP.get(ct) or mimetypes.guess_extension(ct) or ""
-                            )
-                            if ext:
-                                base_name = (
-                                    filename
-                                    or unquote(p.path.split("/")[-1])
-                                    or "attachment"
+                            # Content-Disposition이 없으면 Content-Type을 통해 확장자 보완
+                            if not filename or "." not in filename:
+                                ct = (
+                                    head_resp.headers.get("Content-Type", "")
+                                    .split(";")[0]
+                                    .strip()
+                                    .lower()
                                 )
-                                if not base_name.endswith(ext):
-                                    filename = f"{base_name}{ext}"
+                                ext = (
+                                    _MIME_MAP.get(ct)
+                                    or mimetypes.guess_extension(ct)
+                                    or ""
+                                )
+                                if ext:
+                                    base_name = (
+                                        filename
+                                        or unquote(p.path.split("/")[-1])
+                                        or "attachment"
+                                    )
+                                    if not base_name.endswith(ext):
+                                        filename = f"{base_name}{ext}"
+                        finally:
+                            head_resp.close()
                     except Exception as e:
                         logger.warning(f"직링크 메타데이터 확인 실패: {e}")
 
@@ -231,63 +329,40 @@ class TistoryResolver(BaseResolver):
                 filename = ""
                 is_attach = False
 
-                # (1) HTML 태그 속성 우선 (download, data-ke-file-name, data-filename)
-                attr_download = a.get("download")
-                attr_kefile = a.get("data-ke-file-name")
-                attr_datafn = a.get("data-filename")
-                if isinstance(attr_download, str) and attr_download.strip():
-                    filename = attr_download.strip()
-                    is_attach = True
-                elif isinstance(attr_kefile, str) and attr_kefile.strip():
-                    filename = attr_kefile.strip()
-                    is_attach = True
-                elif isinstance(attr_datafn, str) and attr_datafn.strip():
-                    filename = attr_datafn.strip()
-                    is_attach = True
-
-                # (2) 부모 파일 블록 컨테이너 확인 (modern tistory)
+                # (1) 부모 파일 블록 컨테이너 확인 (modern tistory: figure.fileblock 등)
                 parent_fig = a.find_parent(
-                    class_=re.compile(r"file-attachment|file_box|file-block|tt-file")
+                    class_=re.compile(
+                        r"file-attachment|file_box|file-block|fileblock|tt-file"
+                    )
                 )
                 if parent_fig:
                     is_attach = True
-                    if not filename:
-                        ntag = parent_fig.find(class_=re.compile(r"name|desc|filename"))
-                        if ntag:
-                            filename = ntag.get_text(strip=True)
 
-                # (3) 첨부파일 URL 패턴 확인 (daumcdn / kakaocdn / cfile)
+                # (2) 첨부파일 URL 패턴 확인 (daumcdn / kakaocdn dn|dna / cfile)
                 if not is_attach and _ATTACH_URL_PATTERN.search(full_url):
                     is_attach = True
+
+                # (3) 명시적 파일명 속성 확인 (download, data-ke-file-name, data-filename)
+                for attr_name in ("download", "data-ke-file-name", "data-filename"):
+                    attr_val = a.get(attr_name)
+                    if isinstance(attr_val, str) and attr_val.strip():
+                        is_attach = True
+                        break
 
                 if not is_attach:
                     continue
 
-                # (4) <a> 태그 내부 텍스트를 파일명으로 매칭
-                if not filename:
-                    txt = a.get_text(strip=True)
-                    if (
-                        txt
-                        and not txt.startswith("http://")
-                        and not txt.startswith("https://")
-                    ):
-                        filename = txt
+                # (4) 속성 -> .filename .name -> .size 제외 텍스트 순으로 순수 파일명 추출
+                filename = _extract_clean_link_filename(a, parent_fig)
 
-                # (5) 쿼리스트링(knm) 또는 URL 경로에서 파일명 추출
+                # (5) URL 경로 또는 쿼리스트링(knm)에서 파일명 추출
                 if not filename or filename in (
                     "다운로드",
                     "내려받기",
                     "download",
                     "FILE",
                 ):
-                    parsed_u = urlparse(full_url)
-                    qs = parse_qs(parsed_u.query)
-                    if "knm" in qs and qs["knm"]:
-                        filename = unquote(qs["knm"][0].strip())
-                    else:
-                        base = unquote(parsed_u.path.split("/")[-1])
-                        if "." in base:
-                            filename = base
+                    filename = _extract_filename_from_url(full_url)
 
                 # (6) 단순 이미지 뷰어 링크 필터링 (아이콘이거나 명시적 첨부파일인 경우는 보존)
                 if any(filename.lower().endswith(ext) for ext in _IMAGE_EXTENSIONS):
@@ -351,7 +426,12 @@ class TistoryResolver(BaseResolver):
                     except Exception:
                         pass
 
-                    raw_txt = a.get_text(strip=True) or a.get("title") or a.get("download") or ""
+                    raw_txt = (
+                        _extract_clean_link_filename(a)
+                        or a.get("title")
+                        or a.get("download")
+                        or ""
+                    )
                     link_txt = str(raw_txt).strip() if raw_txt else ""
                     link_txt = re.sub(r"^[\s▼▶▷►\-_]+", "", link_txt).strip()
 

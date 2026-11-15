@@ -4,6 +4,16 @@
 
 ---
 
+## [v0.1.62] - 2026-11-15
+
+### 🐛 Bug Fixes
+- **티스토리(`<figure class="fileblock">`) 및 Kakao CDN(`/dna/`) 첨부파일 파일명 오염 수정**:
+  - `TistoryResolver` (`downloader/resolvers/tistory.py`)가 `blog.kakaocdn.net/dna/` 링크 및 `<figure class="fileblock">` 블록을 정상 인식하도록 패턴(`_ATTACH_URL_PATTERN`, `can_handle()`, `is_direct_attachment_url()`)과 부모 블록 탐색을 확장하고, `.size` 요소(`11.86MB` 등) 및 말미 파일 크기 문자열이 분할 압축 파일명(`.7z.001`~`.7z.065`)에 붙지 않도록 `_text_excluding_size` / `_strip_trailing_filesize`를 도입했습니다.
+  - `/dna/` 첨부파일 URL에서 `HEAD` 요청이 `404`를 반환하는 경우 `GET (stream=True)` 폴백으로 `Content-Disposition` 및 `Content-Length`를 조회하도록 개선했습니다.
+  - 일반 웹페이지 리졸버(`downloader/resolvers/webpage.py`) 및 Chrome 확장 프로그램 페이지 링크 스캐너(`extension/popup.js`)에서도 `.filename .name` / `span.name` 우선 추출 및 `.size` 텍스트·말미 크기 표기 제거를 적용하고 회귀 테스트(`tests/test_tistory_gdrive.py`)를 추가했습니다.
+
+---
+
 ## [v0.1.61] - 2026-11-14
 
 ### 📋 크롬 확장 프로그램 오프스크린 클립보드 감시 및 알림 토스트 보완

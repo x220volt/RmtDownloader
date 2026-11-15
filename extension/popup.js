@@ -1584,7 +1584,7 @@ function extractPageDownloadLinksInPage() {
     { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
     { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
     { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
-    { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dn|daumcdn\.net)/i },
+    { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dna?|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
     { service: "Romsfun", regex: /romsfun\.com\/download\//i },
     { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
@@ -1616,6 +1616,24 @@ function extractPageDownloadLinksInPage() {
   function cleanTitle(str) {
     if (!str) return "";
     return str.replace(/\s+/g, " ").replace(/^[\s▼▶▷►\-_]+/, "").trim();
+  }
+
+  function extractCleanAnchorTitle(a) {
+    const explicit = a.getAttribute("download") || a.getAttribute("data-ke-file-name") || a.getAttribute("data-filename") || "";
+    if (explicit.trim()) return cleanTitle(explicit);
+    const nameEl = a.querySelector(".filename .name, span.name, .se-file-name, .file_name, .filename");
+    if (nameEl && (nameEl.innerText || "").trim()) {
+      return cleanTitle(nameEl.innerText);
+    }
+    try {
+      const clone = a.cloneNode(true);
+      clone.querySelectorAll(".size, .file-size, .filesize").forEach((el) => el.remove());
+      const rawClean = cleanTitle(clone.textContent || a.getAttribute("title") || "");
+      if (rawClean) {
+        return rawClean.replace(/(\.[a-zA-Z0-9]{1,8}(?:\.\d{3})?)(?:\s*\d+(?:\.\d+)?\s*[KMGTPE]i?B|\s+\d+(?:\.\d+)?\s*B)$/i, "$1").trim();
+      }
+    } catch (e) {}
+    return cleanTitle(a.innerText || a.getAttribute("title") || "");
   }
 
   const isNaverCafe = /(?:cafe\.naver\.com|m\.cafe\.naver\.com)/i.test(currentUrl);
@@ -1739,9 +1757,7 @@ function extractPageDownloadLinksInPage() {
       seenUrls.add(href);
 
       const title =
-        cleanTitle(
-          a.innerText || a.getAttribute("download") || a.getAttribute("title") || ""
-        ) ||
+        extractCleanAnchorTitle(a) ||
         href.split("/").pop().split("?")[0] ||
         href;
       links.push({
@@ -1769,12 +1785,11 @@ function extractPageDownloadLinksInPage() {
       if (isMagnet || isHosting || isFile) {
         if (!seenUrls.has(href)) {
           seenUrls.add(href);
-          const title =
-            cleanTitle(
-              a.innerText || a.getAttribute("download") || a.getAttribute("title") || ""
-            ) ||
-            href.split("/").pop().split("?")[0] ||
-            href;
+          let leafName = href.split("/").pop().split("?")[0] || href;
+          try {
+            leafName = decodeURIComponent(leafName);
+          } catch (e) {}
+          const title = extractCleanAnchorTitle(a) || leafName || href;
 
           let password = "";
           const parentText = a.parentElement ? a.parentElement.innerText : "";

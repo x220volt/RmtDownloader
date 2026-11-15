@@ -17,6 +17,7 @@ from ..url_helper import (
     with_password,
 )
 from .base import BaseResolver
+from .tistory import _text_excluding_size
 
 logger = logging.getLogger(__name__)
 
@@ -613,7 +614,7 @@ class WebPageResolver(BaseResolver):
                     ctx_pwd_m.group(1).strip() if ctx_pwd_m else fallback_body_pwd
                 )
 
-                link_text = a.get_text(strip=True)
+                link_text = _text_excluding_size(a)
                 attr_fn = (
                     a.get("download")
                     or a.get("data-ke-file-name")
@@ -623,14 +624,17 @@ class WebPageResolver(BaseResolver):
                 explicit_name = str(attr_fn).strip() if isinstance(attr_fn, str) else ""
 
                 if not explicit_name:
-                    # 스마트에디터 ONE 등 첨부파일 모듈 구조 탐색
+                    # 스마트에디터 ONE 및 티스토리 fileblock 등 첨부파일 모듈 구조 탐색
                     file_mod = a.find_parent(
                         class_=re.compile(
-                            r"se-module-file|file_attach|attach_file", re.I
+                            r"se-module-file|file_attach|attach_file|fileblock|file-block|file_box|tt-file",
+                            re.I,
                         )
                     )
                     if file_mod:
-                        fn_el = file_mod.find(
+                        fn_el = file_mod.select_one(
+                            ".filename .name, span.name"
+                        ) or file_mod.find(
                             class_=re.compile(r"se-file-name|file_name|filename", re.I)
                         )
                         ext_el = file_mod.find(
@@ -639,14 +643,14 @@ class WebPageResolver(BaseResolver):
                             )
                         )
                         if fn_el and ext_el:
-                            fn_str = fn_el.get_text(strip=True)
+                            fn_str = _text_excluding_size(fn_el)
                             ext_str = ext_el.get_text(strip=True)
                             if ext_str and not fn_str.lower().endswith(ext_str.lower()):
                                 explicit_name = f"{fn_str}{ext_str}"
                             else:
                                 explicit_name = fn_str
                         elif fn_el:
-                            explicit_name = fn_el.get_text(strip=True)
+                            explicit_name = _text_excluding_size(fn_el)
 
                 if not explicit_name:
                     path_leaf = unquote(urlparse(full_href).path).split("/")[-1].strip()
