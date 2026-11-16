@@ -28,7 +28,7 @@
     { service: "GigaFile", regex: /(?:gigafile\.nu|xgf\.nu)\//i },
     { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
     { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
-    { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
+    { service: "Naver Cafe", regex: /(?:downapi\.cafe\.naver\.com|cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?|ca-fe\/))/i },
     { service: "Tistory", regex: /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
     { service: "GitHub", regex: /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i },
@@ -198,6 +198,21 @@
     } catch (e) {
       return null;
     }
+  }
+
+  function clearRetroDbContext() {
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.remove(["pendingRetroDbContext"], () => {
+          void chrome.runtime.lastError;
+        });
+      }
+    } catch (e) {}
+    try {
+      chrome.runtime.sendMessage({ action: "clearRetroDbContext" }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {}
   }
 
   function isRemoteDownloaderDashboard() {
@@ -719,6 +734,9 @@
               return;
             }
             const count = response.count || parsed.urls.length || 1;
+            if (retroCtx) {
+              clearRetroDbContext();
+            }
             dlBtn.className = "rd-btn-dl ok";
             dlBtn.textContent = `✓ ${count}개 작업 전송 완료!`;
             setTimeout(() => {
@@ -767,6 +785,14 @@
     const container = document.body || document.documentElement;
     if (!container) return false;
     removeToast();
+
+    function scheduleRetroDbAutoHide(durationMs = RETRODB_TOAST_AUTO_HIDE_MS) {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        clearRetroDbContext();
+        removeToast();
+      }, durationMs);
+    }
 
     const host = document.createElement("div");
     host.id = HOST_ELEMENT_ID;
@@ -905,7 +931,10 @@
     closeBtn.className = "rd-close";
     closeBtn.title = "닫기";
     closeBtn.textContent = "×";
-    closeBtn.addEventListener("click", removeToast);
+    closeBtn.addEventListener("click", () => {
+      clearRetroDbContext();
+      removeToast();
+    });
 
     head.appendChild(badge);
     head.appendChild(closeBtn);
@@ -931,9 +960,13 @@
     dismissBtn.type = "button";
     dismissBtn.className = "rd-btn-dismiss";
     dismissBtn.textContent = "닫기";
-    dismissBtn.addEventListener("click", removeToast);
+    dismissBtn.addEventListener("click", () => {
+      clearRetroDbContext();
+      removeToast();
+    });
 
     dlBtn.addEventListener("click", () => {
+      clearRetroDbContext();
       if (hideTimer) {
         clearTimeout(hideTimer);
         hideTimer = null;
@@ -953,12 +986,13 @@
             sourceUrl: location.href,
           },
           (response) => {
+            clearRetroDbContext();
             if (chrome.runtime.lastError || !response || !response.ok) {
               dlBtn.className = "rd-btn-dl err";
               dlBtn.textContent = "❌ 전송 실패 (팝업 설정 확인)";
               dlBtn.disabled = false;
               dismissBtn.disabled = false;
-              scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+              scheduleRetroDbAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
               return;
             }
             const count = response.count || 1;
@@ -970,11 +1004,12 @@
           }
         );
       } catch (err) {
+        clearRetroDbContext();
         dlBtn.className = "rd-btn-dl err";
         dlBtn.textContent = "❌ 확장 프로그램 연결 오류";
         dlBtn.disabled = false;
         dismissBtn.disabled = false;
-        scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+        scheduleRetroDbAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
       }
     });
 
@@ -994,14 +1029,14 @@
     });
     card.addEventListener("mouseleave", () => {
       if (!dlBtn.disabled) {
-        scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+        scheduleRetroDbAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
       }
     });
 
     shadow.appendChild(styleEl);
     shadow.appendChild(card);
     container.appendChild(host);
-    scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+    scheduleRetroDbAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
     return true;
   }
 

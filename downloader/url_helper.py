@@ -698,6 +698,7 @@ def parse_download_candidates(
     single_source_title: str = "",
     single_source_url: str = "",
     single_is_auto: bool | None = None,
+    single_cookies: str = "",
 ) -> list:
     """
     다양한 형태(일반 URL, Base64 문자열, 텍스트 라인, 다중 객체 등)로부터
@@ -727,6 +728,8 @@ def parse_download_candidates(
             opts["source_url"] = single_source_url
         if single_is_auto is not None and "is_auto" not in opts:
             opts["is_auto"] = single_is_auto
+        if single_cookies and "cookies" not in opts:
+            opts["cookies"] = single_cookies
         return opts
 
     # 1. raw_items (딕셔너리 리스트)
@@ -742,6 +745,8 @@ def parse_download_candidates(
                         opts_item["password"] = it["password"]
                     if "is_auto" in it:
                         opts_item["is_auto"] = it["is_auto"]
+                    if it.get("cookies"):
+                        opts_item["cookies"] = it["cookies"]
                     candidates.append(
                         {
                             "url": u,

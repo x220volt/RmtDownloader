@@ -219,11 +219,7 @@ def _validate_file_response(response, url, filename: str = ""):
     is_attachment = cd_raw.strip().lower().startswith("attachment")
     header_filename = extract_filename_from_headers(response.headers, None)
 
-    explicit_html = (
-        _is_html_filename(urlparse(url).path)
-        or (is_attachment and _is_html_filename(header_filename))
-        or (_is_html_filename(filename) and (is_attachment or not is_html_ct))
-    )
+    explicit_html = is_attachment and _is_html_filename(header_filename)
     if is_html_ct and not explicit_html:
         raise ValueError("다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.")
     return content_type, explicit_html

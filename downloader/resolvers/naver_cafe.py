@@ -1,6 +1,7 @@
 """네이버 카페 (cafe.naver.com) 게시글 첨부파일 및 다운로드 링크 리졸버."""
 
 import logging
+import os
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -107,6 +108,32 @@ class NaverCafeResolver(BaseResolver):
         url = url.strip()
         p = urlparse(url)
         host = (p.hostname or "").lower()
+        options = options or {}
+
+        # 0. 쿠키 파싱 (옵션 -> 서버 설정 -> 환경변수)
+        cookie_val = str(
+            options.get("cookies")
+            or options.get("cookie")
+            or ""
+        ).strip()
+        if not cookie_val:
+            try:
+                from config import load_settings
+
+                s = load_settings()
+                cookie_val = str(
+                    s.get("naver_cafe_cookie")
+                    or s.get("naver_cookie")
+                    or ""
+                ).strip()
+            except Exception:
+                pass
+        if not cookie_val:
+            cookie_val = (
+                os.environ.get("NAVER_CAFE_COOKIE")
+                or os.environ.get("NAVER_COOKIE")
+                or ""
+            ).strip()
 
         with requests.Session() as session:
             session.headers.update(
@@ -115,17 +142,22 @@ class NaverCafeResolver(BaseResolver):
                     "Referer": "https://cafe.naver.com/",
                 }
             )
+            if cookie_val:
+                session.headers["Cookie"] = cookie_val
 
             # 1. 이미 추출된 downapi.cafe.naver.com 직링크인 경우
             if host == "downapi.cafe.naver.com":
+                headers = {
+                    "User-Agent": DEFAULT_USER_AGENT,
+                    "Referer": "https://cafe.naver.com/",
+                }
+                if cookie_val:
+                    headers["Cookie"] = cookie_val
                 return {
                     "url": url,
                     "filename": "",
-                    "headers": {
-                        "User-Agent": DEFAULT_USER_AGENT,
-                        "Referer": "https://cafe.naver.com/",
-                    },
-                    "cookies": "",
+                    "headers": headers,
+                    "cookies": cookie_val,
                     "referer": "https://cafe.naver.com/",
                     "source_service": "Naver Cafe",
                 }
@@ -150,8 +182,29 @@ class NaverCafeResolver(BaseResolver):
                 f"네이버 카페 게시글 API 조회: club_id={club_id}, article_id={article_id}"
             )
             api_url = f"https://apis.naver.com/cafe-web/cafe-articleapi/v2.1/cafes/{club_id}/articles/{article_id}"
-            resp = session.get(api_url, headers={"Referer": url}, timeout=15)
-            resp.raise_for_status()
+            resp = None
+            try:
+                resp = session.get(api_url, headers={"Referer": url}, timeout=15)
+                resp.raise_for_status()
+            except requests.exceptions.HTTPError as http_err:
+                status_code = (
+                    http_err.response.status_code
+                    if http_err.response is not None
+                    else (resp.status_code if resp is not None else 0)
+                )
+                if status_code == 401:
+                    err_msg = (
+                        f"네이버 카페 '{cafe_name or club_id}' 게시글({article_id})은 "
+                        f"로그인이 필요한 멤버 전용 글입니다. "
+                        f"크롬 확장 프로그램에서 해당 페이지를 열어 스캔 전송하시거나, "
+                        f"서버 설정에서 네이버 쿠키(naver_cafe_cookie)를 등록해 주세요."
+                    )
+                    raise PermissionError(err_msg) from http_err
+                elif status_code == 404:
+                    raise FileNotFoundError(
+                        f"존재하지 않거나 삭제된 네이버 카페 게시글입니다: {url}"
+                    ) from http_err
+                raise
 
             data = resp.json()
             result = data.get("result", {})
@@ -199,17 +252,21 @@ class NaverCafeResolver(BaseResolver):
 
             first_file = file_items[0]
 
+            headers = {
+                "User-Agent": DEFAULT_USER_AGENT,
+                "Referer": f"https://cafe.naver.com/{cafe_name}/{article_id}"
+                if cafe_name
+                else "https://cafe.naver.com/",
+            }
+            if cookie_val:
+                headers["Cookie"] = cookie_val
+
             # 단일 또는 다중 파일 결과 반환
             return {
                 "url": first_file["url"],
                 "filename": first_file["name"],
-                "headers": {
-                    "User-Agent": DEFAULT_USER_AGENT,
-                    "Referer": f"https://cafe.naver.com/{cafe_name}/{article_id}"
-                    if cafe_name
-                    else "https://cafe.naver.com/",
-                },
-                "cookies": "",
+                "headers": headers,
+                "cookies": cookie_val,
                 "referer": url,
                 "source_service": "Naver Cafe",
                 "files": file_items,  # 전체 첨부파일 목록

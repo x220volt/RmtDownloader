@@ -49,11 +49,18 @@ COMMUNITY_HOSTS = (
     "itch.io",
     "gamebanana.com",
     "kemono.su",
+    "blogspot.com",
+    "blogspot.kr",
+    "blogger.com",
+    "tistory.com",
+    "velog.io",
+    "brunch.co.kr",
+    "medium.com",
 )
 
 # 일반 웹사이트에서 게시글/문서 뷰어로 판단할 경로 패턴
 ARTICLE_PATH_REGEX = re.compile(
-    r"/(?:board/view|mgallery/board/view|mini/board/view|bbs/board\.php|article|articles|post|posts|entry|threads|topic)(?:/|$|\?)",
+    r"/(?:board/view|mgallery/board/view|mini/board/view|bbs/board\.php|article|articles|post|posts|entry|threads|topic|\d{4}/\d{2})(?:/|$|\?)",
     re.I,
 )
 
@@ -329,6 +336,8 @@ def _find_content_containers(soup: BeautifulSoup) -> list:
         ".post_article",  # 클리앙 본문
         ".post_content",
         ".entry-content",  # 티스토리 / 워드프레스
+        ".post-body",  # 블로그스팟(Blogger) 본문
+        ".post-entry",
         ".tt_article_useless_p_margin",
         ".article_skin",
         ".article-view",
@@ -381,6 +390,10 @@ class WebPageResolver(BaseResolver):
 
         host = (parsed.hostname or "").lower()
         if any(host == h or host.endswith("." + h) for h in COMMUNITY_HOSTS):
+            return True
+
+        path_lower = (parsed.path or "").lower()
+        if path_lower.endswith((".html", ".htm", ".php", ".asp", ".aspx", ".jsp")):
             return True
 
         if ARTICLE_PATH_REGEX.search(parsed.path or ""):

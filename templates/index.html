@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.65') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.66') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.65') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.66') }}</p>
         </div>
       </div>
 
@@ -432,7 +432,7 @@
               </p>
               <div class="settings-update-row">
                 <div class="settings-update-vers">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.65') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.66') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -569,6 +569,19 @@
                 <label class="form-label" for="settingGofileToken">GoFile API 계정 토큰 (선택사항)</label>
                 <input type="text" id="settingGofileToken" class="form-input" placeholder="비워두면 무료 게스트 토큰을 자동 사용합니다">
                 <span class="form-help">GoFile 프리미엄/VIP 계정이 있는 경우 토큰을 입력하면 최고 속도로 다운로드됩니다.</span>
+              </div>
+            </div>
+
+            <!-- Naver Cafe 카드 -->
+            <div class="settings-card" style="margin-bottom: 0;">
+              <div class="settings-card-title">
+                <span class="badge" style="font-size: 0.8rem; padding: 4px 8px; background: rgba(3, 199, 90, 0.15); color: #03c75a; border: 1px solid rgba(3, 199, 90, 0.3);">Naver Cafe</span>
+                <span>네이버 카페 회원/멤버 전용 게시글 연동</span>
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" for="settingNaverCafeCookie">네이버 카페 로그인 쿠키 (선택사항)</label>
+                <input type="text" id="settingNaverCafeCookie" class="form-input" placeholder="브라우저 개발자 도구에서 복사한 네이버 쿠키 (NID_AUT, NID_SES 등) 붙여넣기" autocomplete="off">
+                <span class="form-help">로그인이 필요한 멤버 전용 네이버 카페 게시글의 첨부파일 다운로드를 지원합니다. 크롬 확장 프로그램에서 현재 페이지를 스캔하거나 탭을 직접 전송하면 쿠키 없이도 브라우저 세션으로 바로 다운로드할 수 있습니다.</span>
               </div>
             </div>
           </div>
@@ -950,6 +963,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.65') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.66') }}"></script>
 </body>
 </html>

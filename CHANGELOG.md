@@ -4,6 +4,20 @@
 
 ---
 
+## [v0.1.66] - 2026-11-17
+- **✨ 주요 기능 및 버그 수정**:
+  - **네이버 카페 회원 전용 첨부파일 다운로드 및 브라우저 세션 직접 추출 지원 (`downloader/resolvers/naver_cafe.py`, `config.py`, `extension/popup.js`, `templates/index.html`, `static/js/app.js`)**:
+    - 네이버 카페 회원 전용 첨부파일(`downapi.cafe.naver.com`) 다운로드를 위해 `naver_cafe_cookie` 설정을 지원하고, 미인증 시 친절한 가이드를 제공합니다.
+    - 크롬 확장 프로그램 팝업에서 네이버 카페 게시글 탭인 경우 브라우저 탭 세션을 활용해 `apis.naver.com` 및 본문 내 첨부파일 링크를 직접 스캔·추출하여 원클릭으로 일괄 전송할 수 있도록 개선했습니다.
+  - **블로그스팟(Blogspot) 및 일반 웹페이지 HTML 다운로드 오류 방지 및 실제 파일 링크 자동 폴백 (`downloader/engine.py`, `downloader/resolvers/webpage.py`, `extension/popup.js`)**:
+    - `.html` URL이나 `text/html` 응답 수신 시 단순 파일로 오인 다운로드하지 않고, 즉시 `WebPageResolver`로 폴백하여 페이지 내 실제 구글 드라이브나 첨부파일 다운로드 링크를 추출하도록 개선했습니다.
+  - **RetroDB 도착 안내 토스트 반복 표시 해결 (`extension/content.js`)**:
+    - RetroDB 링크 클릭 후 대상 페이지에 표시되는 도착 토스트에서 `다운로드`, `닫기(×)`, `닫기 버튼`을 누르거나 15초 자동 소멸 시 저장소의 `pendingRetroDbContext`를 즉시 삭제하여, 이후 다른 창이나 탭을 열 때 토스트가 계속해서 뜨는 문제를 해결했습니다.
+  - **폴더 이름 자동 지정 1회성(One-shot) 적용 (`extension/popup.js`, `extension/background.js`)**:
+    - 팝업 입력창에 자동 채워진 폴더명을 1회성으로 즉시 소비하고, 전송 완료(현재 탭, 직접 링크, 스캔 링크) 시 입력창을 초기화하여 이후 다운로드에 이전 폴더명이 지속적으로 잘못 적용되던 문제를 해결했습니다.
+
+---
+
 ## [v0.1.65] - 2026-11-16
 - **🐛 버그 수정**:
   - **원격 데스크톱(RDP) 및 미설정 상태에서 크롬 확장 팝업 프리징/입력 멈춤 해결 (`extension/offscreen.js`, `extension/background.js`, `extension/content.js`, `extension/popup.js`)**:

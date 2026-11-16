@@ -668,6 +668,9 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
       targetSubfolder = retroCtx.subfolder;
     }
   }
+  // 1회성 적용: 자동 지정 폴더 컨텍스트는 즉시 소비(제거)하여 후속 다운로드에 절대 영향 주지 않도록 함
+  clearRetroDbContext().catch(() => {});
+
   if (targetSubfolder) {
     payload.subfolder = targetSubfolder;
   }
@@ -707,6 +710,7 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
       }
 
       if (res.ok && data.success) {
+        clearRetroDbContext().catch(() => {});
         const count = data.added_count || 1;
         if (extraOptions.rawClipboardText) {
           const sentText = String(extraOptions.rawClipboardText).trim();

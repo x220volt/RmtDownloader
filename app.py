@@ -478,6 +478,12 @@ def add_jobs():
         data.get("source_url") or data.get("post_url") or single_referer or ""
     ).strip()
 
+    single_cookies = str(
+        data.get("cookies")
+        or data.get("cookie")
+        or ""
+    ).strip()
+
     force = bool(data.get("force", False))
     capture_page = bool(data.get("capture_page")) if "capture_page" in data else None
     save_url_link = bool(data.get("save_url_link")) if "save_url_link" in data else None
@@ -494,6 +500,7 @@ def add_jobs():
         single_source_title=source_title,
         single_source_url=source_url,
         single_is_auto=is_auto,
+        single_cookies=single_cookies,
     )
 
     if candidates:
@@ -1115,11 +1122,11 @@ def _validate_extension_zip_entry(filename: str) -> str:
         or normalized.startswith("/")
         or ":" in normalized
     ):
-        raise ValueError("보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
+        raise ValueError("보안 위협 감지: 허용되지 않는 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
 
     parts = [part for part in normalized.split("/") if part]
     if not parts or any(part in (".", "..") for part in parts):
-        raise ValueError("보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
+        raise ValueError("보안 위협 감지: 허용되지 않는 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
 
     ext = Path(parts[-1]).suffix.lower()
     if ext not in EXTENSION_ALLOWED_EXTENSIONS:
@@ -1662,6 +1669,7 @@ def get_settings():
             "max_concurrent_downloads": s.get("max_concurrent_downloads", 3),
             "gofile_token": s.get("gofile_token", ""),
             "terabox_cookie": s.get("terabox_cookie", ""),
+            "naver_cafe_cookie": s.get("naver_cafe_cookie", ""),
             "terabox_password": s.get("terabox_password", ""),
             "auto_passwords": s.get(
                 "auto_passwords", s.get("terabox_password", "")
@@ -1790,6 +1798,7 @@ def update_settings():
                 "max_concurrent_downloads": updated.get("max_concurrent_downloads"),
                 "auth_username": updated.get("auth_username"),
                 "terabox_cookie": updated.get("terabox_cookie"),
+                "naver_cafe_cookie": updated.get("naver_cafe_cookie"),
                 "terabox_password": updated.get("terabox_password"),
                 "auto_passwords": updated.get(
                     "auto_passwords", updated.get("terabox_password", "")

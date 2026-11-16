@@ -1564,6 +1564,23 @@ async function tryAutoFillFromClipboard() {
   }
 }
 
+function clearSubfolderInputsAndContext() {
+  if (manualSubfolderInput) manualSubfolderInput.value = "";
+  if (scanSubfolderInput) scanSubfolderInput.value = "";
+  try {
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.remove(["pendingRetroDbContext"], () => {
+        void chrome.runtime.lastError;
+      });
+    }
+  } catch (e) {}
+  try {
+    chrome.runtime.sendMessage({ action: "clearRetroDbContext" }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {}
+}
+
 async function tryAutoFillRetroDbSubfolder() {
   try {
     if (!chrome.storage || !chrome.storage.local) return;
@@ -1584,6 +1601,15 @@ async function tryAutoFillRetroDbSubfolder() {
     if (scanSubfolderInput && !scanSubfolderInput.value.trim()) {
       scanSubfolderInput.value = ctx.subfolder;
     }
+    // 1회성 적용: 팝업 입력창에 자동 지정 후 저장소의 컨텍스트는 즉시 제거하여 후속 다운로드/새 창 영향 방지
+    try {
+      chrome.storage.local.remove(["pendingRetroDbContext"], () => {
+        void chrome.runtime.lastError;
+      });
+      chrome.runtime.sendMessage({ action: "clearRetroDbContext" }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {}
   } catch (e) {}
 }
 
@@ -1623,7 +1649,56 @@ async function sendCurrentTab() {
   sendCurrentTabBtn.innerHTML = `<span>전송 중...</span>`;
 
   try {
+    // 네이버 카페 게시글인 경우 브라우저 탭 세션으로 첨부파일 직접 추출 시도
+    const isNaverCafe = /(?:cafe\.naver\.com|m\.cafe\.naver\.com)/i.test(tab.url);
+    const cafeArticleMatch = tab.url.match(/cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?|ca-fe\/)/i);
+    if (isNaverCafe && cafeArticleMatch && tab.id) {
+      try {
+        const scanResults = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: extractPageDownloadLinksInPage,
+        });
+        if (scanResults && scanResults[0] && Array.isArray(scanResults[0].result)) {
+          const directFiles = scanResults[0].result.filter(
+            (item) => item.url && (item.url.includes("downapi.cafe.naver.com") || item.filename)
+          );
+          if (directFiles.length > 0) {
+            const items = directFiles.map((f) => ({
+              url: f.url,
+              filename: f.filename || f.title || "",
+              subfolder: subfolder || f.subfolder || "",
+              referer: tab.url,
+              source_title: tab.title || "",
+              source_url: tab.url,
+            }));
+            const resData = await sendBatchJobs(
+              items,
+              subfolder,
+              tab.url,
+              tab.title || "",
+              tab.url
+            );
+            clearSubfolderInputsAndContext();
+            sendCurrentTabBtn.innerHTML = `<span>✓ 전송 완료!</span>`;
+            const addedCount = resData.added_count || items.length;
+            showPopupToast(`✅ 네이버 카페 첨부파일 ${addedCount}개가 서버로 전송되었습니다!`);
+            setTimeout(() => {
+              sendCurrentTabBtn.disabled = false;
+              sendCurrentTabBtn.innerHTML = originalHtml;
+            }, 1400);
+
+            switchToActiveTab();
+            await fetchJobs();
+            return;
+          }
+        }
+      } catch (scanErr) {
+        console.warn("네이버 카페 탭 내 첨부파일 사전 추출 실패, URL 직접 전송으로 대체:", scanErr);
+      }
+    }
+
     const resData = await sendUrl(tab.url, subfolder, "", "", tab.url, tab.title || "", tab.url);
+    clearSubfolderInputsAndContext();
     sendCurrentTabBtn.innerHTML = `<span>✓ 전송 완료!</span>`;
     const addedCount = resData.added_count || 1;
     showPopupToast(`✅ ${addedCount}개의 작업이 서버로 전송되었습니다!`);
@@ -1674,7 +1749,7 @@ async function sendManualUrl() {
     } catch (e) {}
     autoFilledClipboardRawText = "";
     manualUrlInput.value = "";
-    if (manualSubfolderInput) manualSubfolderInput.value = "";
+    clearSubfolderInputsAndContext();
     if (manualPasswordInput) manualPasswordInput.value = "";
     sendManualBtn.textContent = "✓ 전송 완료!";
     const addedCount = resData.added_count || 1;
@@ -1705,7 +1780,7 @@ function switchToActiveTab() {
   currentTab = "active";
 }
 
-async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "", referer = "", sourceTitle = "", sourceUrl = "") {
+async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "", referer = "", sourceTitle = "", sourceUrl = "", filename = "", cookies = "") {
   const serverUrl = normalizeServerUrl(serverUrlInput.value);
   if (!serverUrl) {
     throw new Error("서버 주소를 먼저 설정해 주세요.");
@@ -1731,6 +1806,12 @@ async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "
   if (sourceUrl) {
     payload.source_url = sourceUrl;
   }
+  if (filename) {
+    payload.filename = filename;
+  }
+  if (cookies) {
+    payload.cookies = cookies;
+  }
 
   let res;
   try {
@@ -1743,6 +1824,55 @@ async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "
         body: JSON.stringify(payload),
       },
       4000
+    );
+  } catch (networkErr) {
+    throw new Error("서버에 연결할 수 없습니다. 서버 IP 설정을 확인하세요.");
+  }
+
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    throw new Error("비밀번호 인증 실패 (설정을 확인하세요)");
+  }
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || `서버 에러 (${res.status})`);
+  }
+
+  return data;
+}
+
+async function sendBatchJobs(items, subfolder = "", referer = "", sourceTitle = "", sourceUrl = "") {
+  const serverUrl = normalizeServerUrl(serverUrlInput.value);
+  if (!serverUrl) {
+    throw new Error("서버 주소를 먼저 설정해 주세요.");
+  }
+
+  const payload = { items: items };
+  if (subfolder) {
+    payload.subfolder = subfolder;
+  }
+  if (referer) {
+    payload.referer = referer;
+  }
+  if (sourceTitle) {
+    payload.source_title = sourceTitle;
+  }
+  if (sourceUrl) {
+    payload.source_url = sourceUrl;
+  }
+
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      `${serverUrl}/api/jobs`,
+      {
+        method: "POST",
+        credentials: "omit",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      },
+      8000
     );
   } catch (networkErr) {
     throw new Error("서버에 연결할 수 없습니다. 서버 IP 설정을 확인하세요.");
@@ -1811,7 +1941,7 @@ async function scanCurrentPage() {
 }
 
 // 브라우저 탭 내에서 실행되는 스캐너 함수
-function extractPageDownloadLinksInPage() {
+async function extractPageDownloadLinksInPage() {
   const links = [];
   const seenUrls = new Set();
   const currentUrl = window.location.href;
@@ -1825,7 +1955,7 @@ function extractPageDownloadLinksInPage() {
     { service: "GigaFile", regex: /(?:gigafile\.nu|xgf\.nu)/i },
     { service: "kio.ac", regex: /kio\.ac\/[cf]\//i },
     { service: "Naver MYBOX", regex: /mybox\.naver\.com\/share\//i },
-    { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
+    { service: "Naver Cafe", regex: /(?:downapi\.cafe\.naver\.com|cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?|ca-fe\/))/i },
     { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dna?|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
     { service: "GitHub", regex: /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i },
@@ -1885,24 +2015,139 @@ function extractPageDownloadLinksInPage() {
   const cafeArticleMatch = currentUrl.match(/cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?|ca-fe\/)/i);
   if (isNaverCafe && cafeArticleMatch) {
     let articleTitle = document.title ? document.title.replace(/\s*:\s*네이버\s*카페\s*$/i, "").trim() : "";
+    let clubId = "";
+    let articleId = "";
+    let cafeName = "";
+
     try {
-      const iframe = document.querySelector('iframe#cafe_main, iframe#mainFrame, iframe[name="cafe_main"]');
-      if (iframe && iframe.contentDocument) {
-        const subElem = iframe.contentDocument.querySelector(".title_text, h3.title, .article_header .title");
-        if (subElem && subElem.innerText.trim()) {
-          articleTitle = subElem.innerText.trim();
+      const urlObj = new URL(currentUrl);
+      clubId = urlObj.searchParams.get("clubid") || urlObj.searchParams.get("clubId") || "";
+      articleId = urlObj.searchParams.get("articleid") || urlObj.searchParams.get("articleId") || "";
+
+      if (!clubId || !articleId) {
+        const mCaFe = currentUrl.match(/\/cafes\/(\d+)\/articles\/(\d+)/i);
+        if (mCaFe) {
+          clubId = mCaFe[1];
+          articleId = mCaFe[2];
+        }
+      }
+
+      if (!articleId) {
+        const mPath = currentUrl.match(/cafe\.naver\.com\/([A-Za-z0-9_-]+)\/(\d+)/i);
+        if (mPath) {
+          cafeName = mPath[1];
+          articleId = mPath[2];
         }
       }
     } catch (e) {}
 
+    // iframe#cafe_main 확인
+    try {
+      const iframe = document.querySelector('iframe#cafe_main, iframe#mainFrame, iframe[name="cafe_main"]');
+      if (iframe) {
+        if (iframe.src) {
+          const mIframeClub = iframe.src.match(/clubid=(\d+)/i);
+          if (mIframeClub && !clubId) clubId = mIframeClub[1];
+          const mIframeArt = iframe.src.match(/articleid=(\d+)/i);
+          if (mIframeArt && !articleId) articleId = mIframeArt[1];
+        }
+        if (iframe.contentDocument) {
+          const subElem = iframe.contentDocument.querySelector(".title_text, h3.title, .article_header .title");
+          if (subElem && subElem.innerText && subElem.innerText.trim()) {
+            articleTitle = subElem.innerText.trim();
+          }
+        }
+      }
+    } catch (e) {}
+
+    // window.g_sClubId 또는 script 태그 내 clubid 검색
+    if (!clubId) {
+      try {
+        if (typeof window.g_sClubId !== "undefined" && window.g_sClubId) {
+          clubId = String(window.g_sClubId);
+        }
+      } catch (e) {}
+    }
+    if (!clubId) {
+      try {
+        const scripts = Array.from(document.querySelectorAll("script"));
+        for (const s of scripts) {
+          const m = (s.textContent || "").match(/(?:clubid|club_id|g_sClubId)\s*[:=]\s*["']?(\d+)/i);
+          if (m) {
+            clubId = m[1];
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 여전히 clubId가 없고 cafeName이 있다면 카페 홈에서 clubId 파싱 시도
+    if (!clubId && cafeName && cafeName.toLowerCase() !== "articleread.nhn") {
+      try {
+        const homeResp = await fetch("https://cafe.naver.com/" + cafeName, { credentials: "include" });
+        if (homeResp.ok) {
+          const homeHtml = await homeResp.text();
+          const m = homeHtml.match(/(?:clubid|club_id|g_sClubId)\s*[:=]\s*["']?(\d+)/i);
+          if (m) clubId = m[1];
+        }
+      } catch (e) {}
+    }
+
+    // 브라우저 탭 세션 쿠키를 이용해 네이버 카페 API 직접 호출하여 첨부파일 목록 일괄 추출
+    let directFilesFound = 0;
+    if (clubId && articleId) {
+      try {
+        const apiUrl = `https://apis.naver.com/cafe-web/cafe-articleapi/v2.1/cafes/${clubId}/articles/${articleId}`;
+        const resp = await fetch(apiUrl, { credentials: "include" });
+        if (resp.ok) {
+          const data = await resp.json();
+          const res = (data && data.result) || {};
+          const art = res.article || {};
+          if (art.subject && art.subject.trim()) {
+            articleTitle = art.subject.trim();
+          }
+          const attaches = res.attaches || [];
+          for (const att of attaches) {
+            if (att.type === "F" && att.url) {
+              const fileName = att.fullName || att.name || "attachment.dat";
+              const fileUrl = att.url;
+              if (!seenUrls.has(fileUrl)) {
+                seenUrls.add(fileUrl);
+                directFilesFound++;
+                let sizeStr = "";
+                if (typeof att.size === "number" && att.size > 0) {
+                  const mb = att.size / (1024 * 1024);
+                  sizeStr = mb >= 1 ? ` (${mb.toFixed(1)}MB)` : ` (${Math.round(att.size / 1024)}KB)`;
+                }
+                links.push({
+                  url: fileUrl,
+                  title: `${fileName}${sizeStr}`,
+                  filename: fileName,
+                  service: "Naver Cafe",
+                  password: "",
+                  subfolder: articleTitle,
+                  size: att.size || 0,
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Naver Cafe API scan error:", e);
+      }
+    }
+
     const cleanArticleUrl = currentUrl.split("?")[0].replace(/\/+$/, "") + (currentUrl.includes("?") ? "?" + currentUrl.split("?")[1] : "");
-    seenUrls.add(cleanArticleUrl);
-    links.push({
-      url: currentUrl,
-      title: `[네이버 카페 첨부파일] ${articleTitle || "게시글 첨부파일 일괄"}`,
-      service: "Naver Cafe",
-      password: "",
-    });
+    if (!seenUrls.has(cleanArticleUrl)) {
+      seenUrls.add(cleanArticleUrl);
+      links.push({
+        url: currentUrl,
+        title: `[네이버 카페 첨부파일] ${articleTitle || "게시글 첨부파일 일괄"}`,
+        service: "Naver Cafe",
+        password: "",
+        subfolder: articleTitle,
+      });
+    }
   }
 
   // 1-1. 현재 열린 페이지가 티스토리 게시글인 경우:
@@ -1932,6 +2177,38 @@ function extractPageDownloadLinksInPage() {
         title: `[티스토리 첨부/링크] ${articleTitle || "게시글 다운로드"}`,
         service: "Tistory",
         password: "",
+      });
+    }
+  }
+
+  // 1-2. 현재 열린 페이지가 블로그스팟(Blogspot/Blogger) 게시글인 경우:
+  const isBlogspot = /(?:blogspot\.(?:com|kr)|blogger\.com)/i.test(currentUrl);
+  const blogspotArticleMatch = currentUrl.match(/blogspot\.(?:com|kr)\/\d{4}\/\d{2}\/[^\s\/?#]+\.html/i);
+  if (isBlogspot && blogspotArticleMatch) {
+    let articleTitle = "";
+    try {
+      const ogTitleElem = document.querySelector('meta[property="og:title"]');
+      if (ogTitleElem && ogTitleElem.content) {
+        articleTitle = ogTitleElem.content.trim();
+      } else {
+        const tElem = document.querySelector(".post-title, h1.post-title, h3.post-title, .entry-title, h1");
+        if (tElem && tElem.innerText.trim()) {
+          articleTitle = tElem.innerText.trim();
+        } else if (document.title) {
+          articleTitle = document.title.replace(/\s*[-|–].*$/i, "").trim();
+        }
+      }
+    } catch (e) {}
+
+    const cleanArticleUrl = currentUrl.split("?")[0].replace(/\/+$/, "") + (currentUrl.includes("?") ? "?" + currentUrl.split("?")[1] : "");
+    if (!seenUrls.has(cleanArticleUrl)) {
+      seenUrls.add(cleanArticleUrl);
+      links.push({
+        url: currentUrl,
+        title: `[블로그스팟 파일 검출] ${articleTitle || "게시글 파일 다운로드"}`,
+        service: "WebPage Post",
+        password: "",
+        subfolder: articleTitle,
       });
     }
   }
@@ -2020,7 +2297,7 @@ function extractPageDownloadLinksInPage() {
     // 1. 네이버 카페 전용 첨부파일 요소 정밀 스캔
     const cafeAttachLinks = Array.from(
       doc.querySelectorAll(
-        'a[href*="downapi.cafe.naver.com"], a[href*="FileDownload"], a.link_file, a.btn_file, .attach_box a, .list_file a'
+        'a[href*="downapi.cafe.naver.com"], a[href*="FileDownload"], a[href*="blogattach.naver.net"], a.link_file, a.btn_file, .attach_box a, .list_file a, li.AttachFileListItem a.file_menu[href], .se-module-file a'
       )
     );
     for (const a of cafeAttachLinks) {
@@ -2029,13 +2306,22 @@ function extractPageDownloadLinksInPage() {
       if (seenUrls.has(href)) continue;
       seenUrls.add(href);
 
-      const title =
-        extractCleanAnchorTitle(a) ||
-        href.split("/").pop().split("?")[0] ||
-        href;
+      let title = "";
+      const liItem = a.closest("li.AttachFileListItem, .AttachFileListItem");
+      if (liItem) {
+        const nameEl = liItem.querySelector(".file_name .text, .file_name, .name");
+        if (nameEl && nameEl.innerText && nameEl.innerText.trim()) {
+          title = nameEl.innerText.trim();
+        }
+      }
+      if (!title) {
+        title = extractCleanAnchorTitle(a) || href.split("/").pop().split("?")[0] || href;
+      }
+
       links.push({
         url: href,
         title: title,
+        filename: title,
         service: "Naver Cafe",
         password: "",
       });
@@ -2269,7 +2555,16 @@ async function sendSelectedScannedLinks() {
     const password = pwdInput ? pwdInput.value.trim() : (item.password || "");
 
     try {
-      await sendUrl(item.url, subfolder, password, "", referer, sourceTitle || item.title, referer);
+      await sendUrl(
+        item.url,
+        subfolder || item.subfolder || "",
+        password,
+        "",
+        referer,
+        sourceTitle || item.title,
+        referer,
+        item.filename || ""
+      );
       successCount++;
     } catch (e) {
       failCount++;
@@ -2282,6 +2577,7 @@ async function sendSelectedScannedLinks() {
   sendScannedBtn.innerHTML = originalHtml;
 
   if (successCount > 0) {
+    clearSubfolderInputsAndContext();
     showPopupToast(`✅ ${successCount}개 항목이 서버로 전송되었습니다!${failCount > 0 ? ` (${failCount}개 실패)` : ""}`);
     if (scanSection) scanSection.classList.add("hidden");
     switchToActiveTab();
