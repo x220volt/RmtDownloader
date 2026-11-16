@@ -219,6 +219,7 @@ def test_auth():
             "message": "서버 연결 및 인증 성공",
             "username": settings.get("auth_username", "admin"),
             "capture_source_page": settings.get("capture_source_page", False),
+            "save_source_url_link": bool(settings.get("save_source_url_link", False)),
             "download_dir": settings.get("download_dir"),
         }
     )
@@ -427,6 +428,7 @@ def get_info():
             ),
             "auth_enabled": settings.get("auth_enabled", True),
             "capture_source_page": settings.get("capture_source_page", False),
+            "save_source_url_link": bool(settings.get("save_source_url_link", False)),
             "api_token": api_token,
             "auth_token": api_token,
             "username": session.get("username", "admin"),
@@ -477,6 +479,7 @@ def add_jobs():
 
     force = bool(data.get("force", False))
     capture_page = bool(data.get("capture_page")) if "capture_page" in data else None
+    save_url_link = bool(data.get("save_url_link")) if "save_url_link" in data else None
     is_auto = bool(data.get("is_auto", False))
 
     candidates = parse_download_candidates(
@@ -504,6 +507,9 @@ def add_jobs():
         if capture_page is not None:
             for c in candidates:
                 c.setdefault("options", {})["capture_page"] = capture_page
+        if save_url_link is not None:
+            for c in candidates:
+                c.setdefault("options", {})["save_url_link"] = save_url_link
         added_jobs = download_manager.add_urls(
             candidates,
             subfolder=subfolder,
@@ -668,6 +674,14 @@ def quick_add():
         if capture_raw is not None
         else None
     )
+    save_url_link_raw = request.args.get("save_url_link") or json_body.get(
+        "save_url_link"
+    )
+    save_url_link = (
+        str(save_url_link_raw).lower() in ("1", "true", "yes", "on")
+        if save_url_link_raw is not None
+        else None
+    )
 
     if not raw_target_url:
         return jsonify(
@@ -696,6 +710,9 @@ def quick_add():
         if capture_page is not None:
             for c in candidates:
                 c.setdefault("options", {})["capture_page"] = capture_page
+        if save_url_link is not None:
+            for c in candidates:
+                c.setdefault("options", {})["save_url_link"] = save_url_link
         if len(candidates) > 1:
             added_jobs = download_manager.add_urls(
                 candidates,
@@ -712,6 +729,8 @@ def quick_add():
                 job_options["password"] = pwd
             if terabox_mode:
                 job_options["terabox_mode"] = terabox_mode
+            if save_url_link is not None:
+                job_options["save_url_link"] = save_url_link
             final_url = candidates[0]["url"] if candidates else target_url
             job = download_manager.add_url(
                 final_url,
@@ -1517,6 +1536,7 @@ def get_settings():
             "kone_subfolder": s.get("kone_subfolder", True),
             "check_duplicate_url": s.get("check_duplicate_url", True),
             "capture_source_page": s.get("capture_source_page", False),
+            "save_source_url_link": bool(s.get("save_source_url_link", False)),
             "ignore_ssl_certs": s.get("ignore_ssl_certs", False),
             "aria2_http_enabled": s.get("aria2_http_enabled", False),
             "aria2_http_split": s.get("aria2_http_split", 8),
@@ -1642,6 +1662,9 @@ def update_settings():
                 "kone_subfolder": updated.get("kone_subfolder"),
                 "check_duplicate_url": updated.get("check_duplicate_url"),
                 "capture_source_page": updated.get("capture_source_page", False),
+                "save_source_url_link": bool(
+                    updated.get("save_source_url_link", False)
+                ),
                 "ignore_ssl_certs": updated.get("ignore_ssl_certs", False),
                 "aria2_http_enabled": updated.get("aria2_http_enabled", False),
                 "aria2_http_split": updated.get("aria2_http_split", 8),

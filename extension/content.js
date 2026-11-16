@@ -13,8 +13,10 @@
   }
 
   const HOST_ELEMENT_ID = "rd-clipboard-toast-host";
+  const RETRODB_CONTEXT_TTL_MS = 5 * 60 * 1000;
   const MAX_COPY_TEXT_LENGTH = 8000;
   const TOAST_AUTO_HIDE_MS = 7500;
+  const RETRODB_TOAST_AUTO_HIDE_MS = 12000;
   const DUPLICATE_TOAST_COOLDOWN_MS = 3500;
 
   const HOSTING_PATTERNS = [
@@ -29,6 +31,7 @@
     { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
     { service: "Tistory", regex: /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
+    { service: "GitHub", regex: /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i },
     { service: "Romsfun", regex: /romsfun\.com\/download\//i },
     { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
     { service: "WoWroms", regex: /wowroms\.com\//i },
@@ -45,7 +48,7 @@
     { service: "Pixeldrain", regex: /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i },
   ];
 
-  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
+  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|xdelta|bps|ips|ups|ppf|patch|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
   const URL_TOKEN_REGEX = /(?:https?:\/\/[^\s<>"'`|]+|magnet:\?xt=[^\s<>"'`|]+)/gi;
   const B64_TOKEN_REGEX = /(?:[A-Za-z0-9+/_-]{16,}={0,2})/g;
   const PASSWORD_REGEX = /(?:비번|암호|비밀번호|추출\s*코드|dlkey|pwd|pw|pass|password|code)\s*[:=]\s*([^\s"'<>\n\r,;]{2,32})|(?:비번|암호|비밀번호|추출\s*코드)\s+([a-zA-Z0-9_!@#$%^&*-]{2,32})/i;
@@ -56,6 +59,146 @@
   let clipboardCheckTimers = [];
   let lastPromptRawText = "";
   let lastPromptAt = 0;
+  let lastShownRetroDbToastKey = "";
+
+  function isRetroDbSite() {
+    const host = (location.hostname || "").toLowerCase();
+    return (
+      host === "retrodb.info" ||
+      host.endsWith(".retrodb.info") ||
+      host === "redb.me" ||
+      host.endsWith(".redb.me")
+    );
+  }
+
+  function sanitizeFolderPart(str) {
+    return String(str || "")
+      .replace(/\s+/g, " ")
+      .replace(/[\\/:*?"<>|]/g, "_")
+      .trim();
+  }
+
+  function formatRetroDbSubfolder(platform, title, version, author) {
+    const p = sanitizeFolderPart(platform);
+    const t = sanitizeFolderPart(title);
+    const vRaw = sanitizeFolderPart(version);
+    const a = sanitizeFolderPart(author);
+    const parts = [];
+    if (p) {
+      parts.push(`[${p}]`);
+    }
+    if (t) {
+      parts.push(t);
+    }
+    if (vRaw && vRaw !== "-") {
+      const vNorm = /^v/i.test(vRaw) ? vRaw : `v${vRaw}`;
+      parts.push(vNorm);
+    }
+    if (a && a !== "-") {
+      parts.push(`(${a})`);
+    }
+    return parts.join(" ").trim();
+  }
+
+  function readElementText(root, selector) {
+    if (!root || typeof root.querySelector !== "function") return "";
+    const el = root.querySelector(selector);
+    return el && el.textContent ? el.textContent.replace(/\s+/g, " ").trim() : "";
+  }
+
+  function extractRetroDbContextFromTrigger(targetNode) {
+    if (!isRetroDbSite() || !targetNode || typeof targetNode.closest !== "function") {
+      return null;
+    }
+    const goAnchor = targetNode.closest('a[data-kpgo], a[href*="/krpatch/go"]');
+    if (!goAnchor) return null;
+
+    let patchId = (goAnchor.getAttribute("data-kpgo") || "").trim();
+    if (!patchId) {
+      try {
+        const parsedGo = new URL(goAnchor.getAttribute("href") || "", location.origin);
+        patchId = (parsedGo.searchParams.get("id") || "").trim();
+      } catch (e) {}
+    }
+
+    let platform = "";
+    let title = "";
+    let version = "";
+    let author = "";
+
+    const kpItem = goAnchor.closest(".kpItem");
+    if (kpItem) {
+      if (!patchId) {
+        patchId = (kpItem.getAttribute("data-id") || "").trim();
+      }
+      platform = readElementText(kpItem, ".kpBadge");
+      title = readElementText(kpItem, ".kpTitleT");
+      version = readElementText(kpItem, ".kpVer");
+      author = readElementText(kpItem, ".kpAuthor");
+    } else {
+      const kpdOther = goAnchor.closest(".kpdOther");
+      const heroWatch = document.querySelector(".kpdWatch[data-id]");
+      const watchId = heroWatch ? (heroWatch.getAttribute("data-id") || "").trim() : "";
+      const watchPlatform = heroWatch ? (heroWatch.getAttribute("data-c") || "").trim() : "";
+      const watchTitle = heroWatch ? (heroWatch.getAttribute("data-ti") || "").trim() : "";
+      const watchAuthor = heroWatch ? (heroWatch.getAttribute("data-a") || "").trim() : "";
+
+      if (kpdOther) {
+        if (!patchId) {
+          patchId = (kpdOther.getAttribute("data-kpd-row") || "").trim();
+        }
+        platform = readElementText(kpdOther, ".kpBadge") || watchPlatform || readElementText(document, ".kpdHeroCode");
+        title = readElementText(kpdOther, ".kpdOtherNameT") || watchTitle;
+        version = readElementText(kpdOther, ".kpdOtherVer");
+        author = readElementText(kpdOther, ".kpAuthor, .kpdOtherAuthor");
+        if (!author && (!watchId || !patchId || patchId === watchId || kpdOther.querySelector(".kpOldTag"))) {
+          author = watchAuthor || readElementText(document, ".kpdHeroAuthor");
+        }
+      } else {
+        if (!patchId) {
+          patchId = watchId;
+        }
+        platform = watchPlatform || readElementText(document, ".kpdHeroCode");
+        title = watchTitle || readElementText(document, ".kpdTitle").replace(/\s*한글패치\s*$/, "").trim();
+        version = readElementText(document, ".kpdHeroKV b");
+        author = watchAuthor || readElementText(document, ".kpdHeroAuthor");
+      }
+    }
+
+    const subfolder = formatRetroDbSubfolder(platform, title, version, author);
+    if (!subfolder) return null;
+
+    return {
+      subfolder: subfolder,
+      platform: platform,
+      title: title,
+      version: version,
+      author: author,
+      patchId: patchId,
+      retrodbUrl: location.href,
+      clickedAt: Date.now(),
+    };
+  }
+
+  async function getValidRetroDbContext() {
+    try {
+      if (!chrome.storage || !chrome.storage.local) return null;
+      const items = await new Promise((resolve) =>
+        chrome.storage.local.get(["pendingRetroDbContext"], (data) => {
+          void chrome.runtime.lastError;
+          resolve(data || {});
+        })
+      );
+      const ctx = items && items.pendingRetroDbContext;
+      if (!ctx || typeof ctx !== "object" || !ctx.subfolder) return null;
+      if (typeof ctx.clickedAt !== "number" || Date.now() - ctx.clickedAt > RETRODB_CONTEXT_TTL_MS) {
+        return null;
+      }
+      return ctx;
+    } catch (e) {
+      return null;
+    }
+  }
 
   function isRemoteDownloaderDashboard() {
     return Boolean(
@@ -309,14 +452,14 @@
     }
   }
 
-  function scheduleToastAutoHide() {
+  function scheduleToastAutoHide(durationMs = TOAST_AUTO_HIDE_MS) {
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
       removeToast();
-    }, TOAST_AUTO_HIDE_MS);
+    }, durationMs);
   }
 
-  function showClipboardDownloadToast(parsed, rawText) {
+  function showClipboardDownloadToast(parsed, rawText, retroCtx = null) {
     const container = document.body || document.documentElement;
     if (!container) return false;
     removeToast();
@@ -384,6 +527,19 @@
         font-weight: 600;
         padding: 1px 6px;
         border-radius: 999px;
+      }
+      .rd-folderbadge {
+        background: rgba(245, 158, 11, 0.16);
+        color: #fcd34d;
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 999px;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .rd-close {
         background: transparent;
@@ -491,6 +647,14 @@
       badges.appendChild(pwBadge);
     }
 
+    if (retroCtx && retroCtx.subfolder) {
+      const folderBadge = document.createElement("span");
+      folderBadge.className = "rd-folderbadge";
+      folderBadge.textContent = `📁 ${retroCtx.subfolder}`;
+      folderBadge.title = `저장 폴더: ${retroCtx.subfolder}`;
+      badges.appendChild(folderBadge);
+    }
+
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "rd-close";
@@ -538,9 +702,10 @@
           {
             action: "sendUrl",
             url: parsed.urls.join("\n"),
+            subfolder: retroCtx && retroCtx.subfolder ? retroCtx.subfolder : "",
             password: parsed.password || "",
             referer: location.href,
-            sourceTitle: document.title || "",
+            sourceTitle: (retroCtx && retroCtx.subfolder) || document.title || "",
             sourceUrl: location.href,
             rawClipboardText: rawText,
           },
@@ -597,7 +762,269 @@
     return true;
   }
 
-  function triggerToastForClipboardText(rawText) {
+  function showRetroDbArrivalToast(ctx) {
+    if (!ctx || !ctx.subfolder) return false;
+    const container = document.body || document.documentElement;
+    if (!container) return false;
+    removeToast();
+
+    const host = document.createElement("div");
+    host.id = HOST_ELEMENT_ID;
+    host.style.cssText =
+      "all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483647; display: block !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important;";
+
+    const shadow = host.attachShadow({ mode: "open" });
+
+    const styleEl = document.createElement("style");
+    styleEl.textContent = `
+      .rd-toast {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
+        width: 348px;
+        max-width: calc(100vw - 32px);
+        background: rgba(15, 23, 42, 0.96);
+        color: #f8fafc;
+        border: 1px solid rgba(245, 158, 11, 0.5);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+        padding: 12px 13px;
+        box-sizing: border-box;
+        backdrop-filter: blur(8px);
+        animation: rdSlideUp 0.2s ease-out;
+      }
+      @keyframes rdSlideUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .rd-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .rd-service {
+        background: rgba(245, 158, 11, 0.2);
+        color: #fcd34d;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      .rd-close {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 16px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .rd-close:hover {
+        color: #f8fafc;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .rd-folder {
+        font-size: 12.5px;
+        font-weight: 700;
+        color: #fef3c7;
+        margin-bottom: 4px;
+        word-break: break-all;
+      }
+      .rd-url {
+        font-size: 11px;
+        color: #94a3b8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-bottom: 10px;
+        background: rgba(2, 6, 23, 0.55);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 6px;
+        padding: 5px 7px;
+      }
+      .rd-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .rd-btn-dl {
+        flex: 1;
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        color: #ffffff;
+        border: none;
+        border-radius: 7px;
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: filter 0.15s ease;
+      }
+      .rd-btn-dl:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+      .rd-btn-dl:disabled {
+        opacity: 0.72;
+        cursor: default;
+      }
+      .rd-btn-dl.ok {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      }
+      .rd-btn-dl.err {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      }
+      .rd-btn-dismiss {
+        background: rgba(255, 255, 255, 0.07);
+        color: #cbd5e1;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 7px;
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .rd-btn-dismiss:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: #ffffff;
+      }
+    `;
+
+    const card = document.createElement("div");
+    card.className = "rd-toast";
+
+    const head = document.createElement("div");
+    head.className = "rd-head";
+
+    const badge = document.createElement("span");
+    badge.className = "rd-service";
+    badge.textContent = "RetroDB 한글패치";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "rd-close";
+    closeBtn.title = "닫기";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", removeToast);
+
+    head.appendChild(badge);
+    head.appendChild(closeBtn);
+
+    const folderEl = document.createElement("div");
+    folderEl.className = "rd-folder";
+    folderEl.textContent = `📁 ${ctx.subfolder}`;
+
+    const urlEl = document.createElement("div");
+    urlEl.className = "rd-url";
+    urlEl.textContent = location.href;
+    urlEl.title = location.href;
+
+    const actions = document.createElement("div");
+    actions.className = "rd-actions";
+
+    const dlBtn = document.createElement("button");
+    dlBtn.type = "button";
+    dlBtn.className = "rd-btn-dl";
+    dlBtn.textContent = "📥 이 폴더로 현재 페이지 다운로드";
+
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.className = "rd-btn-dismiss";
+    dismissBtn.textContent = "닫기";
+    dismissBtn.addEventListener("click", removeToast);
+
+    dlBtn.addEventListener("click", () => {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+      dlBtn.disabled = true;
+      dismissBtn.disabled = true;
+      dlBtn.textContent = "⏳ 서버로 전송 중...";
+
+      try {
+        chrome.runtime.sendMessage(
+          {
+            action: "sendUrl",
+            url: location.href,
+            subfolder: ctx.subfolder,
+            referer: location.href,
+            sourceTitle: ctx.subfolder,
+            sourceUrl: location.href,
+          },
+          (response) => {
+            if (chrome.runtime.lastError || !response || !response.ok) {
+              dlBtn.className = "rd-btn-dl err";
+              dlBtn.textContent = "❌ 전송 실패 (팝업 설정 확인)";
+              dlBtn.disabled = false;
+              dismissBtn.disabled = false;
+              scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+              return;
+            }
+            const count = response.count || 1;
+            dlBtn.className = "rd-btn-dl ok";
+            dlBtn.textContent = `✓ ${count}개 작업 전송 완료!`;
+            setTimeout(() => {
+              removeToast();
+            }, 1800);
+          }
+        );
+      } catch (err) {
+        dlBtn.className = "rd-btn-dl err";
+        dlBtn.textContent = "❌ 확장 프로그램 연결 오류";
+        dlBtn.disabled = false;
+        dismissBtn.disabled = false;
+        scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+      }
+    });
+
+    actions.appendChild(dlBtn);
+    actions.appendChild(dismissBtn);
+
+    card.appendChild(head);
+    card.appendChild(folderEl);
+    card.appendChild(urlEl);
+    card.appendChild(actions);
+
+    card.addEventListener("mouseenter", () => {
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
+      }
+    });
+    card.addEventListener("mouseleave", () => {
+      if (!dlBtn.disabled) {
+        scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+      }
+    });
+
+    shadow.appendChild(styleEl);
+    shadow.appendChild(card);
+    container.appendChild(host);
+    scheduleToastAutoHide(RETRODB_TOAST_AUTO_HIDE_MS);
+    return true;
+  }
+
+  async function checkPendingRetroDbArrival() {
+    if (isRetroDbSite() || isRemoteDownloaderDashboard()) {
+      return;
+    }
+    if (!/^https?:\/\//i.test(location.href || "")) {
+      return;
+    }
+    const ctx = await getValidRetroDbContext();
+    if (!ctx || !ctx.subfolder) {
+      return;
+    }
+    const dedupKey = `${ctx.clickedAt}|${location.href}`;
+    if (dedupKey === lastShownRetroDbToastKey) {
+      return;
+    }
+    lastShownRetroDbToastKey = dedupKey;
+    showRetroDbArrivalToast(ctx);
+  }
+
+  async function triggerToastForClipboardText(rawText) {
     if (!clipboardPromptEnabled) {
       return { ok: false, reason: "disabled" };
     }
@@ -622,7 +1049,8 @@
 
     lastPromptRawText = text;
     lastPromptAt = now;
-    const shown = showClipboardDownloadToast(parsed, text);
+    const retroCtx = isRetroDbSite() ? null : await getValidRetroDbContext();
+    const shown = showClipboardDownloadToast(parsed, text, retroCtx);
     return { ok: shown, reason: shown ? "shown" : "no_container" };
   }
 
@@ -670,9 +1098,33 @@
     }, 60);
   }
 
-  function onClickEvent() {
+  function captureRetroDbContextFromEvent(event) {
+    if (!isRetroDbSite()) return;
+    if (event && event.type === "auxclick" && event.button !== 1) return;
+    const ctx = extractRetroDbContextFromTrigger(event ? event.target : null);
+    if (!ctx || !ctx.subfolder) return;
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ pendingRetroDbContext: ctx }, () => {
+          void chrome.runtime.lastError;
+        });
+      }
+    } catch (e) {}
+    try {
+      chrome.runtime.sendMessage({ action: "saveRetroDbContext", context: ctx }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {}
+  }
+
+  function onClickEvent(event) {
+    captureRetroDbContextFromEvent(event);
     if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
     scheduleClipboardCheck();
+  }
+
+  function onAuxClickEvent(event) {
+    captureRetroDbContextFromEvent(event);
   }
 
   function onContextMenuEvent() {
@@ -684,14 +1136,18 @@
     if (!request || request.action !== "showClipboardToast") {
       return false;
     }
-    const result = triggerToastForClipboardText(request.rawText || "");
-    sendResponse(result);
-    return false;
+    triggerToastForClipboardText(request.rawText || "")
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, reason: "error" }));
+    return true;
   }
 
   document.addEventListener("copy", onCopyEvent, true);
   document.addEventListener("click", onClickEvent, true);
+  document.addEventListener("auxclick", onAuxClickEvent, true);
   document.addEventListener("contextmenu", onContextMenuEvent, true);
+
+  checkPendingRetroDbArrival();
 
   try {
     if (chrome.runtime && chrome.runtime.onMessage) {
@@ -702,6 +1158,7 @@
   window.__rdClipboardMonitorCleanup = () => {
     document.removeEventListener("copy", onCopyEvent, true);
     document.removeEventListener("click", onClickEvent, true);
+    document.removeEventListener("auxclick", onAuxClickEvent, true);
     document.removeEventListener("contextmenu", onContextMenuEvent, true);
     try {
       if (chrome.storage && chrome.storage.onChanged) {

@@ -993,6 +993,31 @@ def canonical_url_key(url: str) -> str:
             if m_gf:
                 return f"gofile:{m_gf.group(1)}"
 
+        # GitHub (저장소 기본 주소, /releases, /releases/latest를 동일 최신 릴리즈 키로 통합)
+        if host in ("github.com", "www.github.com"):
+            from .resolvers.github import _RESERVED_OWNERS, _normalize_repo
+
+            segs = [s for s in path.split("/") if s]
+            if len(segs) >= 2:
+                gh_owner = segs[0].lower()
+                gh_repo = _normalize_repo(segs[1]).lower()
+                if (
+                    gh_owner
+                    and gh_repo
+                    and not gh_owner.startswith(".")
+                    and gh_owner not in _RESERVED_OWNERS
+                    and (
+                        len(segs) == 2
+                        or (len(segs) == 3 and segs[2].lower() == "releases")
+                        or (
+                            len(segs) == 4
+                            and segs[2].lower() == "releases"
+                            and segs[3].lower() == "latest"
+                        )
+                    )
+                ):
+                    return f"github:{gh_owner}/{gh_repo}:latest"
+
         # 일반 웹 다운로드 URL: 트래킹/불필요 쿼리 파라미터 제외하고 정규화
         if parsed.query:
             qs = parse_qs(parsed.query)

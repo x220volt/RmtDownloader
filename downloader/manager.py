@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import queue
+import re
 import tempfile
 import threading
 import time
@@ -35,6 +36,60 @@ MAX_HISTORY_ENTRIES = 5000
 
 JOBS_FILE = CONFIG_DIR / "jobs.json"
 MAX_JOBS_ENTRIES = 5000
+
+
+def _sanitize_ini_value(value: str) -> str:
+    return re.sub(r"[\r\n]+", " ", str(value or "")).strip()
+
+
+def save_url_shortcut_file(
+    url: str,
+    dest_dir: str,
+    title_hint: str = "",
+    download_url: str = "",
+    source_page_url: str = "",
+    filename: str = "",
+    service_name: str = "",
+) -> Optional[str]:
+    """원본 페이지 또는 다운로드 주소 바로가기 파일(.url)을 대상 폴더에 저장합니다."""
+    clean_target = _sanitize_ini_value(url)
+    if not clean_target.lower().startswith(("http://", "https://", "magnet:")):
+        return None
+
+    os.makedirs(dest_dir, exist_ok=True)
+    safe_base = re.sub(
+        r'[\\/*?:"<>|\r\n\t]+', "_", (title_hint or "download")
+    ).strip(" ._")
+    if len(safe_base) > 90:
+        safe_base = safe_base[:90].rstrip(" ._")
+    shortcut_name = f"[다운로드링크] {safe_base or 'download'}.url"
+    target_path = os.path.join(dest_dir, shortcut_name)
+
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+        return target_path
+
+    saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        "[InternetShortcut]",
+        f"URL={clean_target}",
+        "",
+        "[RemoteDownloader]",
+        f"DownloadURL={_sanitize_ini_value(download_url)}",
+        f"SourcePageURL={_sanitize_ini_value(source_page_url)}",
+        f"Title={_sanitize_ini_value(title_hint)}",
+        f"Filename={_sanitize_ini_value(filename)}",
+        f"Service={_sanitize_ini_value(service_name)}",
+        f"SavedAt={saved_at}",
+        "",
+    ]
+    try:
+        with open(target_path, "w", encoding="utf-8", newline="\r\n") as stream:
+            stream.write("\n".join(lines))
+        logger.info("다운로드 URL 바로가기 저장 완료: %s", target_path)
+        return target_path
+    except OSError as e:
+        logger.warning("다운로드 URL 바로가기 저장 실패 (%s): %s", target_path, e)
+        return None
 
 
 class DownloadJob:
@@ -1175,6 +1230,47 @@ class DownloadManager:
                     name=f"PageCapture-{job.id[:8]}",
                     daemon=True,
                 ).start()
+
+        should_save_url_link = (
+            bool(job.options.get("save_url_link"))
+            if "save_url_link" in (job.options or {})
+            else bool(settings.get("save_source_url_link", False))
+        )
+        if should_save_url_link and not job.options.get("_url_link_saved"):
+            job.options["_url_link_saved"] = True
+            src_page = str(
+                resolved.get("source_page_url")
+                or job.source_url
+                or (job.options or {}).get("referer")
+                or ""
+            ).strip()
+            dl_link = str(job.original_url or resolved.get("url") or "").strip()
+            shortcut_url = (
+                src_page
+                if src_page.lower().startswith(("http://", "https://"))
+                else dl_link
+            )
+            shortcut_title = str(
+                resolved.get("article_title")
+                or job.source_title
+                or resolved.get("subfolder")
+                or target_subfolder
+                or os.path.splitext(
+                    resolved.get("filename") or job.filename or "download"
+                )[0]
+            ).strip()
+            if shortcut_url.lower().startswith(("http://", "https://", "magnet:")):
+                save_url_shortcut_file(
+                    shortcut_url,
+                    job.download_dir,
+                    title_hint=shortcut_title,
+                    download_url=dl_link,
+                    source_page_url=src_page,
+                    filename=str(resolved.get("filename") or job.filename or "").strip(),
+                    service_name=str(
+                        resolved.get("source_service") or job.service_name or ""
+                    ).strip(),
+                )
 
     def _enqueue_extra_items(
         self, job_id: str, job: DownloadJob, resolved: dict

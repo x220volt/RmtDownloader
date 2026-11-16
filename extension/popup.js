@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   setupEventListeners();
   await tryAutoFillFromClipboard();
+  await tryAutoFillRetroDbSubfolder();
 
   // 최신 릴리즈 확인 (백그라운드에서 비동기 체크)
   checkForExtensionUpdate();
@@ -1176,6 +1177,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("buzzheavier") || lower.includes("bzzhr")) return "tag-buzzheavier";
   if (lower.includes("pixeldrain")) return "tag-pixeldrain";
   if (lower.includes("rootz")) return "tag-rootz";
+  if (lower.includes("github") || lower.includes("깃허브")) return "tag-github";
   if (lower.includes("torrent") || lower.includes("마그넷")) return "tag-torrent";
   return "tag-direct";
 }
@@ -1206,6 +1208,7 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   /downapi\.cafe\.naver\.com/i,
   /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i,
   /rootz\.so\/d\//i,
+  /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i,
   /romsfun\.com\/download\//i,
   /romspure\.cc\/(?:download|roms)\//i,
   /wowroms\.com\//i,
@@ -1222,7 +1225,7 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i,
 ];
 
-const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
+const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|xdelta|bps|ips|ups|ppf|patch|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
 
 function decodeClipboardBase64Once(token) {
   if (!token || token.length < 16) return "";
@@ -1371,6 +1374,29 @@ async function tryAutoFillFromClipboard() {
   }
 }
 
+async function tryAutoFillRetroDbSubfolder() {
+  try {
+    if (!chrome.storage || !chrome.storage.local) return;
+    const items = await new Promise((resolve) =>
+      chrome.storage.local.get(["pendingRetroDbContext"], (data) => {
+        void chrome.runtime.lastError;
+        resolve(data || {});
+      })
+    );
+    const ctx = items && items.pendingRetroDbContext;
+    if (!ctx || typeof ctx !== "object" || !ctx.subfolder) return;
+    if (typeof ctx.clickedAt !== "number" || Date.now() - ctx.clickedAt > 5 * 60 * 1000) {
+      return;
+    }
+    if (manualSubfolderInput && !manualSubfolderInput.value.trim()) {
+      manualSubfolderInput.value = ctx.subfolder;
+    }
+    if (scanSubfolderInput && !scanSubfolderInput.value.trim()) {
+      scanSubfolderInput.value = ctx.subfolder;
+    }
+  } catch (e) {}
+}
+
 // ==========================================
 // URL 전송 관련
 // ==========================================
@@ -1387,12 +1413,13 @@ async function sendCurrentTab() {
     return;
   }
 
+  const subfolder = (manualSubfolderInput ? manualSubfolderInput.value : "").trim();
   sendCurrentTabBtn.disabled = true;
   const originalHtml = sendCurrentTabBtn.innerHTML;
   sendCurrentTabBtn.innerHTML = `<span>전송 중...</span>`;
 
   try {
-    const resData = await sendUrl(tab.url, "", "", "", tab.url, tab.title || "", tab.url);
+    const resData = await sendUrl(tab.url, subfolder, "", "", tab.url, tab.title || "", tab.url);
     sendCurrentTabBtn.innerHTML = `<span>✓ 전송 완료!</span>`;
     const addedCount = resData.added_count || 1;
     showPopupToast(`✅ ${addedCount}개의 작업이 서버로 전송되었습니다!`);
@@ -1586,6 +1613,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
     { service: "Tistory", regex: /(?:tistory\.com\/attachment|kakaocdn\.net\/dna?|daumcdn\.net)/i },
     { service: "Rootz", regex: /rootz\.so\/d\//i },
+    { service: "GitHub", regex: /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i },
     { service: "Romsfun", regex: /romsfun\.com\/download\//i },
     { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
     { service: "WoWroms", regex: /wowroms\.com\//i },
@@ -1602,7 +1630,7 @@ function extractPageDownloadLinksInPage() {
     { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },
   ];
 
-  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|iso|bin|cue|apk|exe|msi|dmg|pkg|mp4|mkv|mp3|flac|torrent)(\?.*)?$/i;
+  const FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|iso|bin|cue|apk|exe|msi|dmg|pkg|xdelta|bps|ips|ups|ppf|patch|mp4|mkv|mp3|flac|torrent)(\?.*)?$/i;
 
   function identifyService(url) {
     if (url.startsWith("magnet:?")) return "BitTorrent";
@@ -1694,6 +1722,28 @@ function extractPageDownloadLinksInPage() {
   }
 
   // 1-2. 현재 열린 페이지 자체가 지원되는 호스팅/클라우드/ROM 다운로드 페이지인 경우 최상단 항목으로 자동 추가
+  const ghRepoPageMatch = currentUrl.match(/^https?:\/\/(?:www\.)?github\.com\/([^\/\s?#]+\/[^\/\s?#]+)/i);
+  const isGitHubPage = Boolean(ghRepoPageMatch);
+  const currentGhRepo = ghRepoPageMatch ? ghRepoPageMatch[1].toLowerCase().replace(/\.git$/i, "") : "";
+
+  function shouldSkipGitHubLink(targetUrl, anchorEl) {
+    if (!isGitHubPage) return false;
+    if (anchorEl && anchorEl.closest("header, nav, footer, .Header, .AppHeader, .footer, .BorderGrid-cell, .Layout-sidebar")) {
+      return true;
+    }
+    const ghLinkMatch = targetUrl.match(/^https?:\/\/(?:www\.)?github\.com\/([^\/\s?#]+\/[^\/\s?#]+)(?:\/([^\/\s?#]+))?/i);
+    if (!ghLinkMatch) return false;
+    const linkRepo = ghLinkMatch[1].toLowerCase().replace(/\.git$/i, "");
+    if (currentGhRepo && linkRepo !== currentGhRepo) {
+      return true;
+    }
+    const linkSub = (ghLinkMatch[2] || "").toLowerCase();
+    if (!linkSub || linkSub === "tree" || linkSub === "blob") {
+      return true;
+    }
+    return false;
+  }
+
   const currentHostingService = identifyService(currentUrl);
   if (
     currentHostingService &&
@@ -1709,6 +1759,14 @@ function extractPageDownloadLinksInPage() {
       if (romBtn) {
         const btnVal = (romBtn.value || romBtn.innerText || "").trim().replace(/^(?:Download|Télécharger|Telecharger)\s+/i, "");
         if (btnVal) pageTitle = btnVal;
+      }
+      if (!pageTitle && isGitHubPage && currentGhRepo) {
+        const ghName = document.querySelector("#repository-container-header strong a, h1.d-inline");
+        if (ghName && ghName.innerText && ghName.innerText.trim()) {
+          pageTitle = ghName.innerText.trim();
+        } else {
+          pageTitle = currentGhRepo;
+        }
       }
       if (!pageTitle) {
         const h1 = document.querySelector("h1, h2, .title, #title");
@@ -1777,6 +1835,9 @@ function extractPageDownloadLinksInPage() {
       if (isNaverCafe && /cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?)/i.test(href)) {
         continue;
       }
+      if (shouldSkipGitHubLink(href, a)) {
+        continue;
+      }
 
       const isMagnet = href.startsWith("magnet:?");
       const isHosting = HOSTING_PATTERNS.some((p) => p.regex.test(href));
@@ -1821,6 +1882,9 @@ function extractPageDownloadLinksInPage() {
       if (seenUrls.has(rawUrl)) continue;
 
       if (isNaverCafe && /cafe\.naver\.com\/(?:[A-Za-z0-9_-]+\/\d+|ArticleRead\.nhn\?)/i.test(rawUrl)) {
+        continue;
+      }
+      if (shouldSkipGitHubLink(rawUrl, null)) {
         continue;
       }
 

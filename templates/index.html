@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.62') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.63') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.62') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.63') }}</p>
         </div>
       </div>
 
@@ -391,6 +391,15 @@
 
               <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
                 <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
+                  <input type="checkbox" id="settingSaveSourceUrlLink" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
+                  <span style="font-weight: 600; color: #fff;">🔗 다운로드 링크 및 원본 페이지 URL 파일 함께 저장 (.url)</span>
+                </label>
+
+                <span class="form-help" style="margin-left: 24px; margin-top: 4px;">커뮤니티/블로그 게시글이나 클라우드 링크로 다운로드할 때, 더블클릭하면 원본 페이지/다운로드 주소로 바로 이동하는 인터넷 바로가기(.url) 파일을 다운로드 폴더에 함께 보관합니다.</span>
+              </div>
+
+              <div class="form-group" style="margin-top: 12px; margin-bottom: 0;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 0;">
                   <input type="checkbox" id="settingIgnoreSslCerts" style="accent-color: var(--accent-primary); width: 16px; height: 16px;">
                   <span style="font-weight: 600; color: #fff;">🛡️ SSL 인증서 검증 무시 (자체 서명 / 사설 인증서 / 프록시 환경 연결 허용)</span>
                 </label>
@@ -423,7 +432,7 @@
               </p>
               <div class="settings-update-row">
                 <div class="settings-update-vers">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.62') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.63') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -903,6 +912,7 @@
                   <span class="badge badge-datanodes" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">DataNodes (datanodes.to)</span>
                   <span class="badge badge-buzzheavier" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">Buzzheavier (buzzheavier.com / bzzhr.to)</span>
                   <span class="badge badge-rootz" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">Rootz (rootz.so)</span>
+                  <span class="badge badge-github" style="background: rgba(148, 163, 184, 0.18); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.35);">GitHub (github.com)</span>
                 </div>
               </div>
 
@@ -940,6 +950,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.62') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.63') }}"></script>
 </body>
 </html>

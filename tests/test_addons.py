@@ -24,6 +24,7 @@ class HostingAddonArchitectureTests(unittest.TestCase):
             "onefichier",
             "kio",
             "pixeldrain",
+            "github",
             "gdrive",
             "xshare",
             "romsfun",
@@ -56,6 +57,7 @@ class HostingAddonArchitectureTests(unittest.TestCase):
             ("https://wowroms.com/download/roms/gameboy/download-game/123.html", "wowroms"),
             ("https://transfer.it/t/xyz", "transferit"),
             ("https://cafe.naver.com/hansicgu/36206", "naver_cafe"),
+            ("https://github.com/snake759494/opoona-wii-korean-patch/releases/latest", "github"),
             ("https://unknown-domain.example.com/file.iso", "direct"),
         ]
         for url, expected_id in test_cases:

@@ -19,6 +19,7 @@ from .services.onefichier import OneFichierAddon
 from .services.kio import KioAddon
 from .services.pixeldrain import PixeldrainAddon
 from .services.gdrive import GoogleDriveAddon
+from .services.github import GitHubAddon
 from .services.xshare import XShareAddon
 from .services.romsfun import RomsfunAddon
 from .services.romspure import RomspureAddon
@@ -38,6 +39,7 @@ __all__ = [
     "DirectAddon",
     "FileKeeperAddon",
     "GigaFileAddon",
+    "GitHubAddon",
     "GofileAddon",
     "GoogleDriveAddon",
     "KioAddon",
@@ -82,6 +84,7 @@ def register_default_addons(registry) -> None:
         OneFichierAddon(),
         KioAddon(),
         PixeldrainAddon(),
+        GitHubAddon(),
         GoogleDriveAddon(),
         MediaFireAddon(),
         FileKeeperAddon(),

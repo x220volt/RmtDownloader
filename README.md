@@ -1,4 +1,4 @@
-# 🚀 원격 다운로더 (Remote Downloader) `v0.1.62`
+# 🚀 원격 다운로더 (Remote Downloader) `v0.1.63`
 
 스마트폰(iPhone / Android)이나 다른 PC의 웹 브라우저에서 링크·마그넷·Base64 코드를 전송하면, 서버 PC에서 해당 파일을 자동으로 해석·다운로드해 주는 파이썬 기반 원격 다운로드 센터입니다.
 
@@ -34,6 +34,7 @@
    - **DataNodes (`datanodes.to`)**: 2단계 인증 및 Turnstile 자동 우회 다운로드 지원.
    - **Buzzheavier (`buzzheavier.com`, `bzzhr.to`)**: 파일 페이지 및 발급된 CDN 직링크(`ts.buzzheavier.com/d/...` 등) 다운로드 지원.
    - **Rootz (`rootz.so/d/...`)**: 프록시 다운로드 API 및 고속 CDN 직링크 자동 추출, 이어받기 지원.
+   - **GitHub (`github.com/.../releases`, `archive`, `raw.githubusercontent.com`)**: 릴리즈(`latest`/`tag`) 에셋 자동 추출·일괄 다운로드 및 저장소 아카이브/Raw 파일 지원.
    - **네이버 MYBOX (`mybox.naver.com/share/...`)**: 공유 링크 및 파일 속성 API를 통한 고속 직링크 발급 및 이어받기 지원.
    - **네이버 카페 & 티스토리 (`cafe.naver.com`, `*.tistory.com`, `kakaocdn`, `daumcdn`)**: 게시글 본문 내 모든 첨부파일 일괄 추출 및 게시글 제목별 하위 폴더 자동 분류.
    - **BitTorrent & Magnet (`magnet:?xt=...`, `.torrent` 파일)**: 내장 `aria2c` 엔진 연동을 통한 고속 토렌트/마그넷 다운로드 및 `.torrent` 파일 드래그 앤 드롭 업로드.

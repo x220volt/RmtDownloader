@@ -4,6 +4,18 @@
 
 ---
 
+## [v0.1.63] - 2026-11-16
+- **✨ 주요 기능 추가**:
+  - **GitHub 다운로드 지원 (`GitHubResolver`, `GitHubAddon`)**:
+    - GitHub 릴리즈 페이지(`/releases/latest`, `/releases/tag/<tag>`, `/releases`, `/releases/expanded_assets/<tag>`), 직접 에셋(`/releases/download/...`), 아카이브(`zipball`, `tarball`, `codeload`), `/blob/`·`/raw/`·`gist` URL을 해석하고 다운로드할 수 있도록 지원합니다.
+    - 저장소 루트 URL(`https://github.com/<owner>/<repo>`) 및 `README` 링크 입력 시 최신 릴리즈 에셋을 우선 조회하고(`archive/HEAD.zip` 폴백 포함), `canonical_url_key()` 통합으로 중복 수집을 방지하며, 웹 UI 및 크롬 확장 프로그램과 연동했습니다.
+  - **다운로드 URL 바로가기(`.url`) 저장 옵션 (`save_source_url_link`, `save_url_shortcut_file`)**:
+    - 설정 UI(`#settingSaveSourceUrlLink`) 및 API(`/api/settings`, `/api/jobs`, `/add`)에 원본 페이지 또는 다운로드 URL 링크 파일(`[다운로드링크] {제목}.url`)을 다운로드 폴더에 함께 보관하는 옵션을 추가했습니다.
+  - **RetroDB (`retrodb.info/krpatch`) `[바로가기]` 폴더명 자동 추출 연동**:
+    - 크롬 확장에서 RetroDB 목록 및 상세 페이지의 `[바로가기]` 클릭을 감지해 `[기종] 제목 v버전 (제작자)` 형식의 하위 폴더명을 자동 생성(`pendingRetroDbContext`)하고, 이동한 대상 페이지의 원클릭 토스트·백그라운드 폴백·팝업 자동 입력과 연동했습니다.
+
+---
+
 ## [v0.1.62] - 2026-11-15
 
 ### 🐛 Bug Fixes

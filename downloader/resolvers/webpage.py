@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from ..engine import fix_mojibake, sanitize_filename, sanitize_folder_name
 from ..url_helper import (
     PASSWORD_REGEX,
+    canonical_url_key,
     clean_url,
     decode_base64_string,
     parse_download_candidates,
@@ -562,7 +563,7 @@ class WebPageResolver(BaseResolver):
             # 현재 게시글 자기 자신 링크는 제외
             if u_clean.rstrip("/") == page_url.rstrip("/"):
                 return
-            dedup_key = u_clean.split("#")[0]
+            dedup_key = canonical_url_key(u_clean) or u_clean.split("#")[0]
             if dedup_key in seen_urls:
                 return
             seen_urls.add(dedup_key)

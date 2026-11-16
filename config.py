@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.62"
+APP_VERSION = "0.1.63"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
 _env_config = os.environ.get("CONFIG_DIR")
@@ -64,6 +64,7 @@ DEFAULT_SETTINGS = {
     "kone_subfolder": True,
     "check_duplicate_url": True,
     "capture_source_page": False,
+    "save_source_url_link": False,
     "ignore_ssl_certs": False,
     "aria2_http_enabled": False,
     "aria2_http_split": 8,
@@ -101,6 +102,7 @@ def validate_settings(settings):
         "kone_subfolder",
         "check_duplicate_url",
         "capture_source_page",
+        "save_source_url_link",
         "ignore_ssl_certs",
         "aria2_http_enabled",
     ):

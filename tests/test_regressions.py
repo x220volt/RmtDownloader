@@ -856,6 +856,7 @@ class ResolverLifecycleTests(unittest.TestCase):
             "cancelSettingsBtn",
             "settingsForm",
             "settingCaptureSourcePage",
+            "settingSaveSourceUrlLink",
         ):
             self.assertIsNotNone(
                 idx_soup.find(id=req_id), f"Missing #{req_id} in templates/index.html"
@@ -1081,11 +1082,13 @@ class ResolverLifecycleTests(unittest.TestCase):
                 json={
                     "url": "https://gall.dcinside.com/mgallery/board/view/?id=retrogame&no=243625",
                     "capture_page": True,
+                    "save_url_link": True,
                 },
             )
             self.assertEqual(res.status_code, 200)
             passed_cands = mock_add_urls.call_args[0][0]
             self.assertTrue(passed_cands[0]["options"].get("capture_page"))
+            self.assertTrue(passed_cands[0]["options"].get("save_url_link"))
 
         import os
 
@@ -1099,23 +1102,31 @@ class ResolverLifecycleTests(unittest.TestCase):
                         "download_dir": tmp_dir,
                         "auth_enabled": False,
                         "capture_source_page": False,
+                        "save_source_url_link": False,
                     }
                 )
                 post_res = client.post(
-                    "/api/settings", json={"capture_source_page": True}
+                    "/api/settings",
+                    json={"capture_source_page": True, "save_source_url_link": True},
                 )
                 self.assertEqual(post_res.status_code, 200)
                 self.assertTrue(post_res.get_json()["settings"]["capture_source_page"])
+                self.assertTrue(
+                    post_res.get_json()["settings"]["save_source_url_link"]
+                )
 
                 get_res = client.get("/api/settings")
                 self.assertEqual(get_res.status_code, 200)
                 self.assertTrue(get_res.get_json()["capture_source_page"])
+                self.assertTrue(get_res.get_json()["save_source_url_link"])
 
                 info_res = client.get("/api/info")
                 self.assertTrue(info_res.get_json()["capture_source_page"])
+                self.assertTrue(info_res.get_json()["save_source_url_link"])
 
                 auth_res = client.post("/api/auth/test")
                 self.assertTrue(auth_res.get_json()["capture_source_page"])
+                self.assertTrue(auth_res.get_json()["save_source_url_link"])
             fake_page = MagicMock()
             fake_page.title = "대해적 스토리 원피스 모드"
 
@@ -1148,6 +1159,75 @@ class ResolverLifecycleTests(unittest.TestCase):
                 assert saved_path is not None
                 self.assertTrue(os.path.exists(saved_path))
                 self.assertIn("[페이지캡처]", os.path.basename(saved_path))
+
+            from downloader.manager import DownloadJob, DownloadManager, save_url_shortcut_file
+
+            shortcut_path = save_url_shortcut_file(
+                "https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                tmp_dir,
+                title_hint="opoona-wii-korean-patch v1.0",
+                download_url="https://github.com/snake759494/opoona-wii-korean-patch",
+                source_page_url="https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                filename="Opoona_Wii_KO_v1.0.xdelta",
+                service_name="GitHub",
+            )
+            self.assertIsNotNone(shortcut_path)
+            assert shortcut_path is not None
+            self.assertTrue(os.path.exists(shortcut_path))
+            self.assertEqual(
+                os.path.basename(shortcut_path),
+                "[다운로드링크] opoona-wii-korean-patch v1.0.url",
+            )
+            shortcut_text = Path(shortcut_path).read_text(encoding="utf-8")
+            self.assertIn("[InternetShortcut]", shortcut_text)
+            self.assertIn(
+                "URL=https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                shortcut_text,
+            )
+            self.assertIn(
+                "DownloadURL=https://github.com/snake759494/opoona-wii-korean-patch",
+                shortcut_text,
+            )
+            self.assertIn(
+                "SourcePageURL=https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                shortcut_text,
+            )
+
+            # DownloadManager._apply_subfolder_and_capture 연동 검증
+            dm = DownloadManager(
+                settings_getter=lambda: dict(
+                    config.DEFAULT_SETTINGS,
+                    download_dir=tmp_dir,
+                    save_source_url_link=True,
+                ),
+                jobs_file=Path(tmp_dir) / "jobs.json",
+            )
+            try:
+                job = DownloadJob(
+                    "https://github.com/snake759494/opoona-wii-korean-patch",
+                    tmp_dir,
+                )
+                dm._apply_subfolder_and_capture(
+                    job,
+                    {
+                        "url": "https://github.com/snake759494/opoona-wii-korean-patch/releases/download/v1.0/Opoona_Wii_KO_v1.0.xdelta",
+                        "filename": "Opoona_Wii_KO_v1.0.xdelta",
+                        "subfolder": "opoona_test_folder",
+                        "article_title": "Opoona Patch",
+                        "source_page_url": "https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                        "source_service": "GitHub",
+                    },
+                    dict(config.DEFAULT_SETTINGS, save_source_url_link=True),
+                )
+                mgr_shortcut = Path(tmp_dir) / "opoona_test_folder" / "[다운로드링크] Opoona Patch.url"
+                self.assertTrue(mgr_shortcut.is_file())
+                mgr_content = mgr_shortcut.read_text(encoding="utf-8")
+                self.assertIn(
+                    "URL=https://github.com/snake759494/opoona-wii-korean-patch/releases/tag/v1.0",
+                    mgr_content,
+                )
+            finally:
+                dm.stop()
 
     def test_kone_ssr_binary_string_extraction_and_gofile_fallback(self):
         import base64

@@ -799,6 +799,7 @@ function getServiceTagClass(service) {
   if (lower.includes('buzzheavier') || lower.includes('bzzhr')) return 'badge-buzzheavier';
   if (lower.includes('pixeldrain')) return 'badge-pixeldrain';
   if (lower.includes('rootz')) return 'badge-rootz';
+  if (lower.includes('github')) return 'badge-github';
   if (lower.includes('gdrive') || lower.includes('google drive') || lower.includes('google')) return 'badge-gdrive';
   return 'badge-direct';
 }
@@ -1599,6 +1600,8 @@ async function openSettings() {
       if (settingCheckDuplicateUrl) settingCheckDuplicateUrl.checked = data.check_duplicate_url !== false;
       const settingCaptureSourcePage = document.getElementById('settingCaptureSourcePage');
       if (settingCaptureSourcePage) settingCaptureSourcePage.checked = Boolean(data.capture_source_page);
+      const settingSaveSourceUrlLink = document.getElementById('settingSaveSourceUrlLink');
+      if (settingSaveSourceUrlLink) settingSaveSourceUrlLink.checked = Boolean(data.save_source_url_link);
       const settingIgnoreSslCerts = document.getElementById('settingIgnoreSslCerts');
       if (settingIgnoreSslCerts) settingIgnoreSslCerts.checked = Boolean(data.ignore_ssl_certs);
       const settingAria2HttpEnabled = document.getElementById('settingAria2HttpEnabled');
@@ -1736,6 +1739,8 @@ async function saveSettings(e) {
   if (settingCheckDuplicateUrl) payload.check_duplicate_url = settingCheckDuplicateUrl.checked;
   const settingCaptureSourcePage = document.getElementById('settingCaptureSourcePage');
   if (settingCaptureSourcePage) payload.capture_source_page = settingCaptureSourcePage.checked;
+  const settingSaveSourceUrlLink = document.getElementById('settingSaveSourceUrlLink');
+  if (settingSaveSourceUrlLink) payload.save_source_url_link = settingSaveSourceUrlLink.checked;
   const settingIgnoreSslCerts = document.getElementById('settingIgnoreSslCerts');
   if (settingIgnoreSslCerts) payload.ignore_ssl_certs = settingIgnoreSslCerts.checked;
   const settingAria2HttpEnabled = document.getElementById('settingAria2HttpEnabled');
@@ -1772,6 +1777,7 @@ async function saveSettings(e) {
         serverInfo.terabox_password = payload.terabox_password || '';
         serverInfo.auto_passwords = payload.auto_passwords || payload.terabox_password || '';
         serverInfo.capture_source_page = Boolean(payload.capture_source_page);
+        serverInfo.save_source_url_link = Boolean(payload.save_source_url_link);
       }
 
       const teraboxPwdInput = document.getElementById('teraboxPwdInput');

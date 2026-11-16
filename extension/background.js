@@ -5,6 +5,7 @@
 
 const OFFSCREEN_DOCUMENT_PATH = "offscreen.html";
 const MAX_COPY_TEXT_LENGTH = 8000;
+const RETRODB_CONTEXT_TTL_MS = 5 * 60 * 1000;
 
 const CLIPBOARD_HOSTING_PATTERNS = [
   { service: "MEGA", regex: /mega\.(?:nz|co\.nz|io)\/(?:file\/|folder\/|#?!)/i },
@@ -18,6 +19,7 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   { service: "Naver Cafe", regex: /downapi\.cafe\.naver\.com/i },
   { service: "Tistory", regex: /(?:\.tistory\.com\/(?:(?:m\/)?\d+|entry\/|attachment)|kakaocdn\.net\/dn|daumcdn\.net)/i },
   { service: "Rootz", regex: /rootz\.so\/d\//i },
+  { service: "GitHub", regex: /^https?:\/\/(?:(?:www\.)?github\.com\/(?!(?:settings|notifications|explore|trending|topics|marketplace|sponsors|login|signup|join|orgs|organizations|users|search|features|pricing|enterprise|about|security|customer-stories|readme|collections|events|codespaces|copilot|pulls|issues|site|solutions|resources|account|apps|dashboard)(?:\/|$|\?|#))[^\/\s?#]+\/[^\/\s?#]+(?:\/(?:releases|archive|zipball|tarball|raw|blob|tree)(?:\/|$|\?|#)|\/?(?:$|\?|#))|(?:raw|objects|release-assets|gist)\.githubusercontent\.com\/[^\/\s]+\/|codeload\.github\.com\/[^\/\s]+\/)/i },
   { service: "Romsfun", regex: /romsfun\.com\/download\//i },
   { service: "Romspure", regex: /romspure\.cc\/(?:download|roms)\//i },
   { service: "WoWroms", regex: /wowroms\.com\//i },
@@ -34,7 +36,7 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   { service: "Pixeldrain", regex: /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i },
 ];
 
-const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
+const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|xdelta|bps|ips|ups|ppf|patch|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;
 const URL_TOKEN_REGEX = /(?:https?:\/\/[^\s<>"'`|]+|magnet:\?xt=[^\s<>"'`|]+)/gi;
 const B64_TOKEN_REGEX = /(?:[A-Za-z0-9+/_-]{16,}={0,2})/g;
 const PASSWORD_REGEX = /(?:비번|암호|비밀번호|추출\s*코드|dlkey|pwd|pw|pass|password|code)\s*[:=]\s*([^\s"'<>\n\r,;]{2,32})|(?:비번|암호|비밀번호|추출\s*코드)\s+([a-zA-Z0-9_!@#$%^&*-]{2,32})/i;
@@ -535,6 +537,56 @@ if (chrome.notifications && chrome.notifications.onClosed) {
   });
 }
 
+async function getValidRetroDbContext() {
+  try {
+    if (!chrome.storage || !chrome.storage.local) return null;
+    const items = await new Promise((res) =>
+      chrome.storage.local.get(["pendingRetroDbContext"], (data) => {
+        void chrome.runtime.lastError;
+        res(data || {});
+      })
+    );
+    const ctx = items && items.pendingRetroDbContext;
+    if (!ctx || typeof ctx !== "object" || !ctx.subfolder) return null;
+    if (typeof ctx.clickedAt !== "number" || Date.now() - ctx.clickedAt > RETRODB_CONTEXT_TTL_MS) {
+      return null;
+    }
+    return ctx;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function saveRetroDbContext(ctx) {
+  try {
+    if (!chrome.storage || !chrome.storage.local || !ctx || typeof ctx !== "object") return false;
+    await new Promise((res) =>
+      chrome.storage.local.set({ pendingRetroDbContext: ctx }, () => {
+        void chrome.runtime.lastError;
+        res(true);
+      })
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function clearRetroDbContext() {
+  try {
+    if (!chrome.storage || !chrome.storage.local) return false;
+    await new Promise((res) =>
+      chrome.storage.local.remove(["pendingRetroDbContext"], () => {
+        void chrome.runtime.lastError;
+        res(true);
+      })
+    );
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // 3. 서버로 URL 전송하는 공통 함수
 async function sendToServer(url, referer = "", extraOptions = {}) {
   let config = {};
@@ -582,8 +634,15 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
     payload.password = extraOptions.password;
     payload.terabox_password = extraOptions.password;
   }
-  if (extraOptions.subfolder) {
-    payload.subfolder = extraOptions.subfolder;
+  let targetSubfolder = (extraOptions.subfolder || "").trim();
+  if (!targetSubfolder && !/^https?:\/\/(?:[^\/]+\.)?(?:retrodb\.info|redb\.me)\//i.test(url)) {
+    const retroCtx = await getValidRetroDbContext();
+    if (retroCtx && retroCtx.subfolder) {
+      targetSubfolder = retroCtx.subfolder;
+    }
+  }
+  if (targetSubfolder) {
+    payload.subfolder = targetSubfolder;
   }
   if (extraOptions.sourceTitle) {
     payload.source_title = extraOptions.sourceTitle;
@@ -730,6 +789,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.action === "clipboardChanged") {
     queueClipboardDetection(request.text || "")
       .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (request.action === "saveRetroDbContext") {
+    saveRetroDbContext(request.context)
+      .then((ok) => sendResponse({ ok: ok }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (request.action === "clearRetroDbContext") {
+    clearRetroDbContext()
+      .then((ok) => sendResponse({ ok: ok }))
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
