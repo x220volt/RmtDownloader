@@ -4,6 +4,17 @@
 
 ---
 
+## [v0.1.64] - 2026-11-16
+- **🐛 버그 수정 및 개선**:
+  - **원격/다중 경로 크롬 확장 프로그램 원클릭 업데이트 개선 (`app.py`, `extension/popup.html`, `extension/popup.css`, `extension/popup.js`)**:
+    - 브라우저 프로필(`_find_all_extension_dirs_in_browser_preferences`)의 실제 로드 경로를 `config.json`의 구 경로보다 우선 탐색해 다중 유효 폴더(`_get_all_target_extension_dirs`)를 함께 동기화하고, `/api/extension/update` 응답에 파일 Base64 맵(`files`, `_extract_extension_files_map`)을 포함하도록 개선했습니다.
+    - 확장에서 `getDiskManifestVersion()`으로 디스크 `manifest.json` 버전 변경 여부를 직접 검증하고, 원격 서버이거나 경로 불일치로 로컬 디스크가 갱신되지 않은 경우 File System Access API(`showDirectoryPicker`) + `DecompressionStream("deflate-raw")` 기반 독립 업데이트 모달(`popup.html?standaloneUpdate=1`)로 내 PC 확장 폴더를 직접 덮어쓴 뒤 재로드하도록 구현했습니다.
+  - **잘못된 서버 IP 및 아이디·비밀번호 미입력 상태에서의 확장 무반응 문제 수정 (`extension/popup.js`, `extension/background.js`)**:
+    - `fetchWithTimeout()` 및 클립보드 읽기 `400ms` 제한을 적용해 접속 불가 서버에서 버튼과 팝업이 ~21초간 멈추는 현상을 제거했습니다.
+    - 미연결/미인증 상태에서는 원클릭 업데이트가 응답 없는 서버 호출을 건너뛰고 즉시 클라이언트 업데이트로 전환되며, 전송·새로고침 실패 및 백그라운드 `401`/접속 실패 시 설정 모달 및 `openSettingsPopupWindow()`로 바로 안내합니다.
+
+---
+
 ## [v0.1.63] - 2026-11-16
 - **✨ 주요 기능 추가**:
   - **GitHub 다운로드 지원 (`GitHubResolver`, `GitHubAddon`)**:

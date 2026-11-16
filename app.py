@@ -1,6 +1,7 @@
 """원격 다운로더 (Remote Downloader) Flask 웹 서버 메인 애플리케이션."""
 
 import atexit
+import base64
 import io
 import json
 import logging
@@ -914,11 +915,38 @@ def _is_mei_dir(p: Path) -> bool:
     return False
 
 
-def _find_extension_in_browser_preferences() -> Optional[Path]:
-    """Chrome, Edge, Whale, Brave 등의 브라우저 프로필에서 설치된 확장 프로그램 경로를 검색합니다."""
+def _is_valid_extension_dir(cand: Path, require_manifest: bool = True) -> bool:
+    """확장 프로그램 대상 폴더가 유효한지(_MEI 제외, manifest 존재 여부) 검사합니다."""
+    try:
+        resolved = cand.resolve()
+        if not resolved.is_dir() or _is_mei_dir(resolved):
+            return False
+        if require_manifest and not (resolved / "manifest.json").is_file():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_remote_downloader_manifest(manifest_path: Path) -> bool:
+    """manifest.json이 Remote Downloader 확장 프로그램인지 확인합니다."""
+    if not manifest_path.is_file():
+        return False
+    try:
+        m_data = json.loads(manifest_path.read_text(encoding="utf-8", errors="ignore"))
+        m_name = str(m_data.get("name", ""))
+        return "Remote Downloader" in m_name or "원격 다운로더" in m_name
+    except Exception:
+        return False
+
+
+def _find_all_extension_dirs_in_browser_preferences(
+    ext_id: Optional[str] = None,
+) -> list[Path]:
+    """Chrome, Edge, Whale, Brave 등의 브라우저 프로필에서 설치된 확장 프로그램 경로 목록을 검색합니다."""
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if not local_app_data:
-        return None
+        return []
 
     browser_user_data_dirs = [
         Path(local_app_data) / "Google" / "Chrome" / "User Data",
@@ -926,6 +954,10 @@ def _find_extension_in_browser_preferences() -> Optional[Path]:
         Path(local_app_data) / "Naver" / "Naver Whale" / "User Data",
         Path(local_app_data) / "BraveSoftware" / "Brave-Browser" / "User Data",
     ]
+
+    exact_matches: list[Path] = []
+    name_matches: list[Path] = []
+    target_ext_id = (ext_id or "").strip()
 
     for b_dir in browser_user_data_dirs:
         if not b_dir.is_dir():
@@ -939,56 +971,54 @@ def _find_extension_in_browser_preferences() -> Optional[Path]:
                     if not pref_path.is_file():
                         continue
                     try:
-                        pref_data = json.loads(pref_path.read_text(encoding="utf-8", errors="ignore"))
+                        pref_data = json.loads(
+                            pref_path.read_text(encoding="utf-8", errors="ignore")
+                        )
                         settings_dict = pref_data.get("extensions", {}).get("settings", {})
+                        if not isinstance(settings_dict, dict):
+                            continue
+
+                        if target_ext_id and target_ext_id in settings_dict:
+                            ext_info = settings_dict.get(target_ext_id) or {}
+                            p_val = ext_info.get("path") if isinstance(ext_info, dict) else None
+                            if p_val and isinstance(p_val, str):
+                                candidate_path = Path(p_val).resolve()
+                                if _is_valid_extension_dir(candidate_path, require_manifest=True):
+                                    exact_matches.append(candidate_path)
+
                         for ext_info in settings_dict.values():
+                            if not isinstance(ext_info, dict):
+                                continue
                             p_val = ext_info.get("path")
                             if not p_val or not isinstance(p_val, str):
                                 continue
                             candidate_path = Path(p_val).resolve()
-                            if candidate_path.is_dir() and not _is_mei_dir(candidate_path):
-                                m_path = candidate_path / "manifest.json"
-                                if m_path.is_file():
-                                    try:
-                                        m_data = json.loads(m_path.read_text(encoding="utf-8", errors="ignore"))
-                                        m_name = m_data.get("name", "")
-                                        if "Remote Downloader" in m_name or "원격 다운로더" in m_name:
-                                            return candidate_path
-                                    except Exception:
-                                        pass
+                            if _is_valid_extension_dir(candidate_path, require_manifest=True):
+                                if _is_remote_downloader_manifest(candidate_path / "manifest.json"):
+                                    name_matches.append(candidate_path)
                     except Exception:
                         pass
         except Exception:
             pass
-    return None
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for path in exact_matches + name_matches:
+        key = str(path).lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(path)
+    return deduped
 
 
-def _get_extension_dir() -> Path:
-    """크롬 확장 프로그램 디렉터리 경로를 지능적으로 확인합니다.
-    
-    1. config.json 설정(extension_dir)에 유효한 경로가 지정되어 있는지 확인
-    2. 로컬 브라우저(Chrome, Edge 등)의 확장 프로그램 설정에서 'Remote Downloader' 설치 경로 자동 탐색
-    3. 일반적인 확장 프로그램 경로 후보군 확인 (Documents, Downloads 등)
-    4. 위 후보가 없을 경우 Documents/RemoteDownloader-Extension 을 기본 경로로 선정
-    (주의: PyInstaller 번들 임시 폴더인 _MEIxxxxxx는 대상에서 영구 배제)
-    """
-    settings = load_settings()
-    configured_dir = str(settings.get("extension_dir") or "").strip()
-    if configured_dir:
-        cand = Path(configured_dir).resolve()
-        if cand.is_dir() and not _is_mei_dir(cand) and (cand / "manifest.json").exists():
-            return cand
+def _find_extension_in_browser_preferences(ext_id: Optional[str] = None) -> Optional[Path]:
+    """브라우저 프로필에서 가장 우선순위가 높은 설치 확장 프로그램 경로를 반환합니다."""
+    matches = _find_all_extension_dirs_in_browser_preferences(ext_id=ext_id)
+    return matches[0] if matches else None
 
-    # 1. 브라우저 프로필 자동 검색
-    detected_from_browser = _find_extension_in_browser_preferences()
-    if detected_from_browser:
-        try:
-            save_settings({"extension_dir": str(detected_from_browser)})
-        except Exception:
-            pass
-        return detected_from_browser
 
-    # 2. 후보 경로 탐색
+def _get_standard_extension_candidates(include_source_dir: bool = False) -> list[Path]:
+    """일반적인 확장 프로그램 설치 후보 경로 목록을 반환합니다."""
     home_dir = Path.home()
     candidates = [
         home_dir / "Documents" / "RemoteDownloader-Extension",
@@ -997,24 +1027,49 @@ def _get_extension_dir() -> Path:
         Path(sys.executable).resolve().parent / "RemoteDownloader-Extension",
         Path(sys.executable).resolve().parent / "extension",
     ]
-
-    # 소스 코드 직접 실행 환경인 경우 (PyInstaller frozen이 아닐 때만)
-    if not getattr(sys, "frozen", False):
+    if include_source_dir and not getattr(sys, "frozen", False):
         candidates.append(Path(__file__).resolve().parent / "extension")
+    return candidates
 
-    for cand in candidates:
+
+def _get_extension_dir(ext_id: Optional[str] = None) -> Path:
+    """크롬 확장 프로그램 디렉터리 경로를 지능적으로 확인합니다.
+
+    1. 로컬 브라우저(Chrome, Edge, Whale, Brave) 프로필에서 현재 로드된 실제 설치 경로 우선 검색
+    2. config.json 설정(extension_dir)에 유효한 경로가 지정되어 있는지 확인
+    3. 일반적인 확장 프로그램 경로 후보군 확인 (Documents, Downloads 등)
+    4. 위 후보가 없을 경우 Documents/RemoteDownloader-Extension 을 기본 경로로 선정
+    (주의: PyInstaller 번들 임시 폴더인 _MEIxxxxxx는 대상에서 영구 배제)
+    """
+    # 1. 브라우저 프로필 자동 검색 (오래된 config.json extension_dir 보다 실제 로드된 경로를 우선)
+    detected_from_browser = _find_extension_in_browser_preferences(ext_id=ext_id)
+    if detected_from_browser:
+        try:
+            save_settings({"extension_dir": str(detected_from_browser)})
+        except Exception:
+            pass
+        return detected_from_browser
+
+    # 2. config.json 설정 확인
+    settings = load_settings()
+    configured_dir = str(settings.get("extension_dir") or "").strip()
+    if configured_dir:
+        cand = Path(configured_dir).resolve()
+        if _is_valid_extension_dir(cand, require_manifest=True):
+            return cand
+
+    # 3. 후보 경로 탐색
+    for cand in _get_standard_extension_candidates(include_source_dir=True):
         cand_resolved = cand.resolve()
-        if _is_mei_dir(cand_resolved):
-            continue
-        if cand_resolved.is_dir() and (cand_resolved / "manifest.json").exists():
+        if _is_valid_extension_dir(cand_resolved, require_manifest=True):
             try:
                 save_settings({"extension_dir": str(cand_resolved)})
             except Exception:
                 pass
             return cand_resolved
 
-    # 3. 모두 실패한 경우 기본값
-    default_dir = (home_dir / "Documents" / "RemoteDownloader-Extension").resolve()
+    # 4. 모두 실패한 경우 기본값
+    default_dir = (Path.home() / "Documents" / "RemoteDownloader-Extension").resolve()
     default_dir.mkdir(parents=True, exist_ok=True)
     try:
         save_settings({"extension_dir": str(default_dir)})
@@ -1023,11 +1078,59 @@ def _get_extension_dir() -> Path:
     return default_dir
 
 
+def _get_all_target_extension_dirs(ext_id: Optional[str] = None) -> list[Path]:
+    """로컬 업데이트 시 함께 동기화할 모든 유효 확장 프로그램 디렉터리 목록을 반환합니다."""
+    primary = _get_extension_dir(ext_id=ext_id).resolve()
+    raw_dirs: list[Path] = [primary]
+
+    raw_dirs.extend(_find_all_extension_dirs_in_browser_preferences(ext_id=ext_id))
+
+    settings = load_settings()
+    configured_dir = str(settings.get("extension_dir") or "").strip()
+    if configured_dir:
+        cand = Path(configured_dir).resolve()
+        if _is_valid_extension_dir(cand, require_manifest=True):
+            raw_dirs.append(cand)
+
+    for cand in _get_standard_extension_candidates(include_source_dir=False):
+        cand_resolved = cand.resolve()
+        if _is_valid_extension_dir(cand_resolved, require_manifest=True):
+            raw_dirs.append(cand_resolved)
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for p in raw_dirs:
+        key = str(p).lower()
+        if key not in seen:
+            seen.add(key)
+            deduped.append(p)
+    return deduped
+
+
+def _validate_extension_zip_entry(filename: str) -> str:
+    """확장 프로그램 zip 내부 경로의 확장자 화이트리스트 및 경로 탈출 여부를 검증합니다."""
+    normalized = filename.replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or ":" in normalized
+    ):
+        raise ValueError("보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
+
+    parts = [part for part in normalized.split("/") if part]
+    if not parts or any(part in (".", "..") for part in parts):
+        raise ValueError("보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다.")
+
+    ext = Path(parts[-1]).suffix.lower()
+    if ext not in EXTENSION_ALLOWED_EXTENSIONS:
+        raise ValueError(
+            f"보안 위협 감지: 허용되지 않는 파일 확장자({ext})가 포함되어 있습니다."
+        )
+    return "/".join(parts)
+
+
 def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
     """확장 프로그램 zip 데이터를 보안 검증 후 안전하게 대상 폴더에 덮어씁니다."""
-    import io
-    import zipfile
-
     target_dir = Path(target_dir).resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1036,17 +1139,13 @@ def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
         if not infolist:
             raise ValueError("압축 파일이 비어 있습니다.")
 
+        file_entries = []
         for info in infolist:
             if info.is_dir() or info.filename.endswith("/"):
                 continue
 
-            ext = Path(info.filename).suffix.lower()
-            if ext not in EXTENSION_ALLOWED_EXTENSIONS:
-                raise ValueError(
-                    f"보안 위협 감지: 허용되지 않는 파일 확장자({ext})가 포함되어 있습니다."
-                )
-
-            dest_path = (target_dir / info.filename).resolve()
+            rel_posix = _validate_extension_zip_entry(info.filename)
+            dest_path = (target_dir / rel_posix).resolve()
             try:
                 is_safe_path = dest_path.is_relative_to(target_dir)
             except AttributeError:
@@ -1055,9 +1154,36 @@ def _safe_extract_extension_zip(zip_bytes: bytes, target_dir: Path) -> int:
                 raise ValueError(
                     "보안 위협 감지: 상위 경로 조작(Zip Slip) 시도가 감지되었습니다."
                 )
+            file_entries.append((info, rel_posix))
 
-        zf.extractall(target_dir)
-        return len([i for i in infolist if not i.is_dir() and not i.filename.endswith("/")])
+        if not file_entries:
+            raise ValueError("압축 파일이 비어 있습니다.")
+
+        for info, rel_posix in file_entries:
+            dest_path = (target_dir / rel_posix).resolve()
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info, "r") as src, open(dest_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        return len(file_entries)
+
+
+def _extract_extension_files_map(zip_bytes: bytes) -> dict[str, str]:
+    """확장 프로그램 zip 데이터를 검증한 뒤 {상대경로: base64} 맵으로 반환합니다."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        infolist = zf.infolist()
+        if not infolist:
+            raise ValueError("압축 파일이 비어 있습니다.")
+
+        files_map: dict[str, str] = {}
+        for info in infolist:
+            if info.is_dir() or info.filename.endswith("/"):
+                continue
+            rel_posix = _validate_extension_zip_entry(info.filename)
+            raw_bytes = zf.read(info)
+            files_map[rel_posix] = base64.b64encode(raw_bytes).decode("ascii")
+        if not files_map:
+            raise ValueError("압축 파일이 비어 있습니다.")
+        return files_map
 
 
 @app.route("/api/extension/update", methods=["POST"])
@@ -1070,6 +1196,7 @@ def update_extension():
 
     data = request.get_json(silent=True) or {}
     tag_name = (data.get("tag") or data.get("tag_name") or "").strip()
+    ext_id = (data.get("extension_id") or "").strip()
 
     # 1. 깃허브 API에서 릴리즈 정보 조회
     release_api = (
@@ -1147,17 +1274,28 @@ def update_extension():
             502,
         )
 
-    # 5. [보안 안전장치 2 & 3] Zip Slip 방어 및 파일 확장자 화이트리스트 검사 후 압축 해제
-    target_dir = _get_extension_dir()
+    # 5. [보안 안전장치 2 & 3] Zip Slip 방어 및 파일 확장자 화이트리스트 검사 후 압축 해제 및 파일 맵 추출
+    target_dirs = _get_all_target_extension_dirs(ext_id=ext_id)
+    updated_dirs: list[str] = []
+    count = 0
     try:
-        count = _safe_extract_extension_zip(zip_resp.content, target_dir)
+        files_map = _extract_extension_files_map(zip_resp.content)
+        count = _safe_extract_extension_zip(zip_resp.content, target_dirs[0])
+        updated_dirs.append(str(target_dirs[0]))
     except ValueError as ve:
         return jsonify({"status": "error", "success": False, "error": str(ve)}), 400
     except Exception as e:
         return jsonify({"status": "error", "success": False, "error": f"확장 프로그램 갱신 중 오류: {e}"}), 500
 
+    for extra_dir in target_dirs[1:]:
+        try:
+            _safe_extract_extension_zip(zip_resp.content, extra_dir)
+            updated_dirs.append(str(extra_dir))
+        except Exception as extra_err:
+            logger.warning(f"추가 확장 프로그램 폴더 동기화 건너뜀 ({extra_dir}): {extra_err}")
+
     logger.info(
-        f"크롬 확장 프로그램이 GitHub 릴리즈({resolved_tag})로 성공적으로 업데이트되었습니다. ({count}개 파일 갱신, 경로: {target_dir})"
+        f"크롬 확장 프로그램이 GitHub 릴리즈({resolved_tag})로 성공적으로 업데이트되었습니다. ({count}개 파일 갱신, 경로: {', '.join(updated_dirs)})"
     )
     return jsonify(
         {
@@ -1166,6 +1304,9 @@ def update_extension():
             "message": f"확장 프로그램이 {resolved_tag} 버전으로 안전하게 업데이트되었습니다.",
             "version": resolved_tag,
             "updated_files": count,
+            "target_dir": updated_dirs[0],
+            "updated_dirs": updated_dirs,
+            "files": files_map,
         }
     )
 
@@ -1269,6 +1410,7 @@ def update_app():
 
     data = request.get_json(silent=True) or {}
     tag_name = (data.get("tag") or data.get("tag_name") or "").strip()
+    ext_id = (data.get("extension_id") or "").strip()
 
     is_frozen = getattr(sys, "frozen", False)
 

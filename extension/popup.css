@@ -1663,3 +1663,50 @@ body {
   cursor: pointer;
   flex-shrink: 0;
 }
+
+.hidden {
+  display: none !important;
+}
+
+/* 원격/수동 확장 폴더 업데이트 모달 */
+.remote-update-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.remote-update-desc {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-main);
+  word-break: keep-all;
+}
+
+.remote-update-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  word-break: keep-all;
+}
+
+.remote-update-steps code {
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+}
+
+.remote-update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}

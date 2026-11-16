@@ -65,6 +65,12 @@ const updateBanner = document.getElementById("updateBanner");
 const updateVersionText = document.getElementById("updateVersionText");
 const updateNotesLink = document.getElementById("updateNotesLink");
 const applyUpdateBtn = document.getElementById("applyUpdateBtn");
+const remoteUpdateModal = document.getElementById("remoteUpdateModal");
+const closeRemoteUpdateModal = document.getElementById("closeRemoteUpdateModal");
+const remoteUpdateDesc = document.getElementById("remoteUpdateDesc");
+const selectExtFolderUpdateBtn = document.getElementById("selectExtFolderUpdateBtn");
+const reselectExtFolderBtn = document.getElementById("reselectExtFolderBtn");
+const downloadExtZipBtn = document.getElementById("downloadExtZipBtn");
 
 const popupPagination = document.getElementById("popupPagination");
 const popupPrevBtn = document.getElementById("popupPrevBtn");
@@ -79,14 +85,53 @@ let popupCurrentPage = 1;
 let baseDownloadDir = "";
 let pollTimer = null;
 let isFetching = false;
+let isServerConnected = false;
 let toastTimer = null;
 let latestReleaseData = null;
+let pendingServerUpdateData = null;
 let autoFilledClipboardRawText = "";
 const UPDATE_CHECK_CACHE_MS = 20 * 60 * 1000; // 20분 캐시
+const EXT_ALLOWED_EXTENSIONS = new Set([
+  ".js",
+  ".html",
+  ".css",
+  ".json",
+  ".png",
+  ".svg",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".ico",
+]);
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadSettings();
   setupEventListeners();
+
+  const params = new URLSearchParams(window.location.search);
+  const isStandaloneUpdate = params.get("standaloneUpdate") === "1";
+  const openSettingsParam = params.get("openSettings") === "1";
+
+  if (isStandaloneUpdate) {
+    await checkForExtensionUpdate(true);
+    await openRemoteUpdateModal();
+    return;
+  }
+
+  if (openSettingsParam && settingsModal) {
+    settingsModal.classList.add("show");
+  }
+
   await tryAutoFillFromClipboard();
   await tryAutoFillRetroDbSubfolder();
 
@@ -183,6 +228,13 @@ function setupEventListeners() {
         refreshBtn.style.transform = "";
         refreshBtn.style.transition = "";
       }, 500);
+      if (!isServerConnected) {
+        const ok = await checkConnection();
+        if (ok) {
+          await fetchJobs();
+        }
+        return;
+      }
       await fetchJobs();
     });
   }
@@ -294,7 +346,13 @@ function setupEventListeners() {
   // 설정 모달 열기 및 닫기
   if (settingsBtn) {
     settingsBtn.addEventListener("click", () => {
-      if (settingsModal) settingsModal.classList.add("show");
+      if (!settingsModal) return;
+      if (settingsModal.classList.contains("show")) {
+        settingsModal.classList.remove("show");
+        return;
+      }
+      if (remoteUpdateModal) remoteUpdateModal.classList.remove("show");
+      settingsModal.classList.add("show");
     });
   }
   if (closeSettingsModal) {
@@ -376,6 +434,30 @@ function setupEventListeners() {
   // 깃허브 최신 릴리즈 원클릭 업데이트 버튼
   if (applyUpdateBtn) {
     applyUpdateBtn.addEventListener("click", applyExtensionUpdate);
+  }
+  if (closeRemoteUpdateModal && remoteUpdateModal) {
+    closeRemoteUpdateModal.addEventListener("click", () => {
+      remoteUpdateModal.classList.remove("show");
+    });
+  }
+  if (remoteUpdateModal) {
+    remoteUpdateModal.addEventListener("click", (e) => {
+      if (e.target === remoteUpdateModal) {
+        remoteUpdateModal.classList.remove("show");
+      }
+    });
+  }
+  if (selectExtFolderUpdateBtn) {
+    selectExtFolderUpdateBtn.addEventListener("click", () => handleSelectFolderUpdateClick(false));
+  }
+  if (reselectExtFolderBtn) {
+    reselectExtFolderBtn.addEventListener("click", () => handleSelectFolderUpdateClick(true));
+  }
+  if (downloadExtZipBtn) {
+    downloadExtZipBtn.addEventListener("click", () => {
+      const downloadUrl = getLatestExtensionZipUrl();
+      chrome.tabs.create({ url: downloadUrl });
+    });
   }
 }
 
@@ -466,21 +548,37 @@ async function saveSettings() {
   serverUrlInput.value = serverUrl;
   usernameInput.value = username;
 
-  await setStorageConfig({
-    serverUrl: serverUrl,
-    username: username,
-    password: password,
-    clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
-    clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
-  });
+  const origBtnText = saveSettingsBtn ? saveSettingsBtn.textContent : "";
+  if (saveSettingsBtn) {
+    saveSettingsBtn.disabled = true;
+    saveSettingsBtn.textContent = "⏳ 저장 중...";
+  }
 
-  showTestResult(true, "설정이 저장되었습니다. 서버 연결을 확인하는 중...");
-  const isConnected = await checkConnection();
-  if (isConnected) {
-    showTestResult(true, "✅ 연결 성공! 설정이 안전하게 저장되었습니다.");
-    showPopupToast("설정이 저장되고 서버에 연결되었습니다.");
-    await fetchJobs();
-    startPolling();
+  try {
+    await setStorageConfig({
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
+      clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
+    });
+
+    showTestResult(true, "설정이 저장되었습니다. 서버 연결을 확인하는 중...");
+    const isConnected = await checkConnection();
+    if (isConnected) {
+      showTestResult(true, "✅ 연결 성공! 설정이 안전하게 저장되었습니다.");
+      showPopupToast("설정이 저장되고 서버에 연결되었습니다.");
+      setTimeout(() => {
+        if (settingsModal) settingsModal.classList.remove("show");
+      }, 600);
+      await fetchJobs();
+      startPolling();
+    }
+  } finally {
+    if (saveSettingsBtn) {
+      saveSettingsBtn.disabled = false;
+      saveSettingsBtn.textContent = origBtnText || "설정 저장";
+    }
   }
 }
 
@@ -518,21 +616,21 @@ async function checkConnection() {
   let lastStatus = 0;
   for (const testUrl of urlsToTry) {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-      const res = await fetch(`${testUrl}/api/auth/test`, {
-        method: "POST",
-        credentials: "omit",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Auth-User": username,
-          "X-Auth-Password": password,
+      const timeoutMs = (testUrl.includes("127.0.0.1") || testUrl.includes("localhost")) ? 1200 : 2000;
+      const res = await fetchWithTimeout(
+        `${testUrl}/api/auth/test`,
+        {
+          method: "POST",
+          credentials: "omit",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Auth-User": username,
+            "X-Auth-Password": password,
+          },
+          body: JSON.stringify({}),
         },
-        body: JSON.stringify({}),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+        timeoutMs
+      );
 
       lastStatus = res.status;
 
@@ -546,14 +644,23 @@ async function checkConnection() {
           baseDownloadDir = data.download_dir;
         }
 
+        isServerConnected = true;
         statusBadge.className = "status-badge online";
         statusText.textContent = "연결됨";
         return true;
       } else if (res.status === 401) {
+        isServerConnected = false;
         statusBadge.className = "status-badge offline";
         statusText.textContent = "비밀번호 불일치";
-        if (settingsModal) settingsModal.classList.add("show");
-        showTestResult(false, "❌ 비밀번호 불일치: 비밀번호를 입력해주세요 (초기 기본값: password1234)");
+        if (settingsModal && !(remoteUpdateModal && remoteUpdateModal.classList.contains("show"))) {
+          settingsModal.classList.add("show");
+        }
+        showTestResult(
+          false,
+          !password
+            ? "❌ 인증 필요: 아이디와 비밀번호를 입력해 주세요 (초기 기본값: password1234)"
+            : "❌ 비밀번호 불일치: 비밀번호를 입력해주세요 (초기 기본값: password1234)"
+        );
         return false;
       }
     } catch (err) {
@@ -561,14 +668,24 @@ async function checkConnection() {
     }
   }
 
+  isServerConnected = false;
   statusBadge.className = "status-badge offline";
   if (lastStatus === 401) {
     statusText.textContent = "비밀번호 불일치";
-    if (settingsModal) settingsModal.classList.add("show");
-    showTestResult(false, "❌ 비밀번호 불일치: 비밀번호를 확인해주세요 (초기 기본값: password1234)");
+    if (settingsModal && !(remoteUpdateModal && remoteUpdateModal.classList.contains("show"))) {
+      settingsModal.classList.add("show");
+    }
+    showTestResult(
+      false,
+      !password
+        ? "❌ 인증 필요: 아이디와 비밀번호를 입력해 주세요 (초기 기본값: password1234)"
+        : "❌ 비밀번호 불일치: 비밀번호를 확인해주세요 (초기 기본값: password1234)"
+    );
   } else {
     statusText.textContent = "연결 안됨";
-    if (settingsModal) settingsModal.classList.add("show");
+    if (settingsModal && !(remoteUpdateModal && remoteUpdateModal.classList.contains("show"))) {
+      settingsModal.classList.add("show");
+    }
     showTestResult(false, `❌ 접속 불가: ${serverUrl} 에 연결할 수 없습니다. PC 서버가 켜져 있는지 확인하세요.`);
   }
   return false;
@@ -596,63 +713,88 @@ async function runConnectionTest() {
     urlsToTry.push(serverUrl.replace("127.0.0.1", "localhost"));
   }
 
-  let errorDetails = "";
-
-  for (const testUrl of urlsToTry) {
-    try {
-      const res = await fetch(`${testUrl}/api/auth/test`, {
-        method: "POST",
-        credentials: "omit",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Auth-User": username,
-          "X-Auth-Password": password,
-        },
-        body: JSON.stringify({}),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (res.ok && data.success) {
-        if (testUrl !== serverUrl) {
-          serverUrlInput.value = testUrl;
-        }
-        await setStorageConfig({
-          serverUrl: testUrl,
-          username: username,
-          password: password,
-          clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
-          clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
-        });
-
-        showTestResult(true, `✅ 연결 및 인증 성공! (${data.username} 계정으로 설정이 저장되었습니다)`);
-        showPopupToast("설정이 저장되었습니다.");
-        setTimeout(() => { if (settingsModal) settingsModal.classList.remove("show"); }, 600);
-        statusBadge.className = "status-badge online";
-        statusText.textContent = "연결됨";
-        if (data.download_dir) {
-          baseDownloadDir = data.download_dir;
-        }
-
-        await fetchJobs();
-        startPolling();
-        return;
-      } else if (res.status === 401) {
-        showTestResult(false, "❌ 인증 실패(401): 비밀번호가 틀립니다. (초기 기본값: password1234)");
-        statusBadge.className = "status-badge offline";
-        statusText.textContent = "비밀번호 불일치";
-        return;
-      } else {
-        errorDetails = `응답 코드 ${res.status}`;
-      }
-    } catch (err) {
-      errorDetails = err.message || "연결 거부";
-    }
+  const origTestBtnText = testConnBtn ? testConnBtn.textContent : "";
+  if (testConnBtn) {
+    testConnBtn.disabled = true;
+    testConnBtn.textContent = "⏳ 테스트 중...";
   }
 
-  showTestResult(false, `❌ 접속 불가(${errorDetails}): 서버(${serverUrl})에 접속할 수 없습니다. RemoteDownloader가 실행 중인지 확인하세요.`);
-  statusBadge.className = "status-badge offline";
-  statusText.textContent = "연결 안됨";
+  let errorDetails = "";
+
+  try {
+    for (const testUrl of urlsToTry) {
+      try {
+        const res = await fetchWithTimeout(
+          `${testUrl}/api/auth/test`,
+          {
+            method: "POST",
+            credentials: "omit",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Auth-User": username,
+              "X-Auth-Password": password,
+            },
+            body: JSON.stringify({}),
+          },
+          2500
+        );
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.success) {
+          if (testUrl !== serverUrl) {
+            serverUrlInput.value = testUrl;
+          }
+          await setStorageConfig({
+            serverUrl: testUrl,
+            username: username,
+            password: password,
+            clipboardAutoFill: clipboardAutoFillCheck ? clipboardAutoFillCheck.checked : true,
+            clipboardCopyPrompt: clipboardCopyPromptCheck ? clipboardCopyPromptCheck.checked : true,
+          });
+
+          isServerConnected = true;
+          showTestResult(true, `✅ 연결 및 인증 성공! (${data.username} 계정으로 설정이 저장되었습니다)`);
+          showPopupToast("설정이 저장되었습니다.");
+          setTimeout(() => { if (settingsModal) settingsModal.classList.remove("show"); }, 600);
+          statusBadge.className = "status-badge online";
+          statusText.textContent = "연결됨";
+          if (data.download_dir) {
+            baseDownloadDir = data.download_dir;
+          }
+
+          await fetchJobs();
+          startPolling();
+          return;
+        } else if (res.status === 401) {
+          isServerConnected = false;
+          showTestResult(
+            false,
+            !password
+              ? "❌ 인증 필요(401): 비밀번호를 입력해 주세요. (초기 기본값: password1234)"
+              : "❌ 인증 실패(401): 비밀번호가 틀립니다. (초기 기본값: password1234)"
+          );
+          statusBadge.className = "status-badge offline";
+          statusText.textContent = "비밀번호 불일치";
+          return;
+        } else {
+          errorDetails = `응답 코드 ${res.status}`;
+        }
+      } catch (err) {
+        errorDetails = err && err.name === "AbortError" ? "응답 시간 초과" : (err.message || "연결 거부");
+      }
+    }
+
+    isServerConnected = false;
+    showTestResult(false, `❌ 접속 불가(${errorDetails}): 서버(${serverUrl})에 접속할 수 없습니다. RemoteDownloader가 실행 중인지 확인하세요.`);
+    statusBadge.className = "status-badge offline";
+    statusText.textContent = "연결 안됨";
+  } finally {
+    if (testConnBtn) {
+      testConnBtn.disabled = false;
+      testConnBtn.textContent = origTestBtnText || "연결 테스트";
+    }
+  }
 }
 
 function showTestResult(isSuccess, message) {
@@ -672,11 +814,15 @@ async function fetchJobs() {
 
   isFetching = true;
   try {
-    const res = await fetch(`${serverUrl}/api/jobs`, {
-      method: "GET",
-      credentials: "omit",
-      headers: getAuthHeaders(false),
-    });
+    const res = await fetchWithTimeout(
+      `${serverUrl}/api/jobs`,
+      {
+        method: "GET",
+        credentials: "omit",
+        headers: getAuthHeaders(false),
+      },
+      2500
+    );
 
     if (res.ok) {
       const data = await res.json();
@@ -1104,11 +1250,15 @@ async function handleJobAction(jobId, action) {
       method = "DELETE";
     }
 
-    const res = await fetch(url, {
-      method: method,
-      credentials: "omit",
-      headers: getAuthHeaders(),
-    });
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: method,
+        credentials: "omit",
+        headers: getAuthHeaders(),
+      },
+      2500
+    );
 
     if (res.ok) {
       await fetchJobs();
@@ -1124,7 +1274,8 @@ async function handleJobAction(jobId, action) {
       showPopupToast(data.error || "작업 처리에 실패했습니다.", true);
     }
   } catch (err) {
-    showPopupToast(`작업 처리 실패: ${err.message}`, true);
+    const errMsg = err && err.name === "AbortError" ? "서버 응답 시간 초과" : err.message;
+    showPopupToast(`작업 처리 실패: ${errMsg}`, true);
   }
 }
 
@@ -1333,7 +1484,11 @@ async function tryAutoFillFromClipboard() {
     if (!manualUrlInput || manualUrlInput.value.trim() !== "") return;
     if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") return;
 
-    const clipText = (await navigator.clipboard.readText() || "").trim();
+    const clipRaw = await Promise.race([
+      navigator.clipboard.readText().catch(() => ""),
+      new Promise((resolve) => setTimeout(() => resolve(""), 400)),
+    ]);
+    const clipText = (clipRaw || "").trim();
     if (!clipText) return;
 
     const stored = await new Promise((resolve) => {
@@ -1401,6 +1556,20 @@ async function tryAutoFillRetroDbSubfolder() {
 // URL 전송 관련
 // ==========================================
 
+function maybePromptSettingsOnSendError(err) {
+  const msg = (err && err.message) || "";
+  if (
+    msg.includes("연결할 수 없습니다") ||
+    msg.includes("인증 실패") ||
+    msg.includes("서버 주소")
+  ) {
+    if (settingsModal) settingsModal.classList.add("show");
+    if (typeof showTestResult === "function" && testResult) {
+      showTestResult(false, `❌ ${msg}`);
+    }
+  }
+}
+
 async function sendCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url) {
@@ -1432,6 +1601,7 @@ async function sendCurrentTab() {
     await fetchJobs();
   } catch (err) {
     showPopupToast("전송 실패: " + err.message, true);
+    maybePromptSettingsOnSendError(err);
     sendCurrentTabBtn.disabled = false;
     sendCurrentTabBtn.innerHTML = originalHtml;
   }
@@ -1483,6 +1653,7 @@ async function sendManualUrl() {
     await fetchJobs();
   } catch (err) {
     showPopupToast("전송 실패: " + err.message, true);
+    maybePromptSettingsOnSendError(err);
     sendManualBtn.disabled = false;
     sendManualBtn.textContent = "링크 전송";
   }
@@ -1526,12 +1697,21 @@ async function sendUrl(targetUrl, subfolder = "", password = "", teraboxMode = "
     payload.source_url = sourceUrl;
   }
 
-  const res = await fetch(`${serverUrl}/api/jobs`, {
-    method: "POST",
-    credentials: "omit",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(payload),
-  });
+  let res;
+  try {
+    res = await fetchWithTimeout(
+      `${serverUrl}/api/jobs`,
+      {
+        method: "POST",
+        credentials: "omit",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      },
+      4000
+    );
+  } catch (networkErr) {
+    throw new Error("서버에 연결할 수 없습니다. 서버 IP 설정을 확인하세요.");
+  }
 
   const data = await res.json().catch(() => ({}));
 
@@ -2033,6 +2213,7 @@ async function sendSelectedScannedLinks() {
 
   let successCount = 0;
   let failCount = 0;
+  let lastError = null;
 
   let referer = "";
   let sourceTitle = "";
@@ -2057,6 +2238,7 @@ async function sendSelectedScannedLinks() {
       successCount++;
     } catch (e) {
       failCount++;
+      lastError = e;
       console.warn("스캔 항목 전송 실패:", item.url, e);
     }
   }
@@ -2070,7 +2252,11 @@ async function sendSelectedScannedLinks() {
     switchToActiveTab();
     await fetchJobs();
   } else {
-    showPopupToast("전송에 실패했습니다. 서버 연결 상태를 확인해 주세요.", true);
+    showPopupToast(
+      `전송 실패: ${(lastError && lastError.message) || "서버 연결 상태를 확인해 주세요."}`,
+      true
+    );
+    maybePromptSettingsOnSendError(lastError);
   }
 }
 
@@ -2154,56 +2340,480 @@ async function checkForExtensionUpdate(force = false) {
 }
 
 /**
- * 로컬 파이썬 서버(/api/extension/update)를 통한 원클릭 업데이트 실행
+ * 디스크 상의 manifest.json 버전을 캐시 없이 읽어옵니다.
  */
-async function applyExtensionUpdate() {
-  const serverUrl = normalizeServerUrl(serverUrlInput.value);
-  if (!serverUrl) {
-    showPopupToast("서버 주소가 설정되지 않았습니다.", true);
+async function getDiskManifestVersion() {
+  try {
+    const manifestUrl = chrome.runtime.getURL(`manifest.json?_t=${Date.now()}`);
+    const res = await fetch(manifestUrl, { cache: "no-store" });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return (data && data.version ? String(data.version) : "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+function getLatestExtensionZipUrl() {
+  if (latestReleaseData && Array.isArray(latestReleaseData.assets)) {
+    const zipAsset = latestReleaseData.assets.find(
+      (a) => a && a.name === "RemoteDownloader-Extension.zip" && a.browser_download_url
+    );
+    if (zipAsset) {
+      return zipAsset.browser_download_url;
+    }
+  }
+  return "https://github.com/x220volt/RmtDownloader/releases/latest/download/RemoteDownloader-Extension.zip";
+}
+
+function openUpdaterDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("rd_ext_updater_db", 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("handles")) {
+        db.createObjectStore("handles");
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB 열기 실패"));
+  });
+}
+
+async function getSavedExtDirHandle() {
+  try {
+    const db = await openUpdaterDb();
+    return await new Promise((resolve) => {
+      const tx = db.transaction("handles", "readonly");
+      const req = tx.objectStore("handles").get("extDirHandle");
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+      tx.oncomplete = () => db.close();
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+async function saveExtDirHandle(handle) {
+  try {
+    const db = await openUpdaterDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("handles", "readwrite");
+      tx.objectStore("handles").put(handle, "extDirHandle");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    });
+  } catch (e) {
+    console.warn("확장 폴더 핸들 저장 실패:", e);
+  }
+}
+
+async function clearSavedExtDirHandle() {
+  try {
+    const db = await openUpdaterDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction("handles", "readwrite");
+      tx.objectStore("handles").delete("extDirHandle");
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        resolve();
+      };
+    });
+  } catch (e) {}
+}
+
+function base64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function validateExtRelPath(rawPath) {
+  const normalized = String(rawPath || "").replace(/\\/g, "/");
+  if (!normalized || normalized.startsWith("/") || normalized.includes(":")) {
+    throw new Error(`허용되지 않는 압축 경로입니다: ${rawPath}`);
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length === 0 || parts.some((p) => p === "." || p === "..")) {
+    throw new Error(`잘못된 압축 경로입니다: ${rawPath}`);
+  }
+  const filename = parts[parts.length - 1];
+  const dotIdx = filename.lastIndexOf(".");
+  const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : "";
+  if (!EXT_ALLOWED_EXTENSIONS.has(ext)) {
+    throw new Error(`허용되지 않는 확장자입니다: ${filename}`);
+  }
+  return parts.join("/");
+}
+
+async function extractZipArrayBuffer(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const view = new DataView(arrayBuffer);
+  const minPos = Math.max(0, bytes.length - 65557);
+
+  let eocdOffset = -1;
+  for (let i = bytes.length - 22; i >= minPos; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      const commentLen = view.getUint16(i + 20, true);
+      if (i + 22 + commentLen === bytes.length) {
+        eocdOffset = i;
+        break;
+      }
+    }
+  }
+  if (eocdOffset < 0) {
+    throw new Error("유효한 ZIP 아카이브(EOCD)를 찾을 수 없습니다.");
+  }
+
+  const totalEntries = view.getUint16(eocdOffset + 10, true);
+  let ptr = view.getUint32(eocdOffset + 16, true);
+  const decoder = new TextDecoder("utf-8");
+  const filesMap = {};
+
+  for (let idx = 0; idx < totalEntries; idx++) {
+    if (ptr + 46 > bytes.length || view.getUint32(ptr, true) !== 0x02014b50) {
+      throw new Error("ZIP 중앙 디렉터리 헤더가 손상되었습니다.");
+    }
+    const compressionMethod = view.getUint16(ptr + 10, true);
+    const compressedSize = view.getUint32(ptr + 20, true);
+    const fileNameLen = view.getUint16(ptr + 28, true);
+    const extraLen = view.getUint16(ptr + 30, true);
+    const commentLen = view.getUint16(ptr + 32, true);
+    const localHeaderOffset = view.getUint32(ptr + 42, true);
+
+    const rawName = decoder.decode(bytes.subarray(ptr + 46, ptr + 46 + fileNameLen));
+    ptr += 46 + fileNameLen + extraLen + commentLen;
+
+    const cleanRaw = rawName.replace(/\\/g, "/");
+    if (cleanRaw.endsWith("/")) {
+      continue;
+    }
+
+    const safeRelPath = validateExtRelPath(cleanRaw);
+    if (
+      localHeaderOffset + 30 > bytes.length ||
+      view.getUint32(localHeaderOffset, true) !== 0x04034b50
+    ) {
+      throw new Error("ZIP 로컬 파일 헤더가 손상되었습니다.");
+    }
+    const lfNameLen = view.getUint16(localHeaderOffset + 26, true);
+    const lfExtraLen = view.getUint16(localHeaderOffset + 28, true);
+    const dataStart = localHeaderOffset + 30 + lfNameLen + lfExtraLen;
+    if (dataStart + compressedSize > bytes.length) {
+      throw new Error(`ZIP 엔트리 크기가 올바르지 않습니다: ${safeRelPath}`);
+    }
+    const compData = bytes.subarray(dataStart, dataStart + compressedSize);
+
+    if (compressionMethod === 0) {
+      filesMap[safeRelPath] = new Uint8Array(compData);
+    } else if (compressionMethod === 8) {
+      const ds = new DecompressionStream("deflate-raw");
+      const decompressedStream = new Blob([compData]).stream().pipeThrough(ds);
+      const decompressedBuf = await new Response(decompressedStream).arrayBuffer();
+      filesMap[safeRelPath] = new Uint8Array(decompressedBuf);
+    } else {
+      throw new Error(`지원하지 않는 ZIP 압축 방식(${compressionMethod})입니다.`);
+    }
+  }
+
+  if (Object.keys(filesMap).length === 0) {
+    throw new Error("확장 프로그램 ZIP 패키지가 비어 있습니다.");
+  }
+  return filesMap;
+}
+
+async function fetchLatestExtensionFilesMap(serverUpdateData) {
+  if (serverUpdateData && serverUpdateData.files && typeof serverUpdateData.files === "object") {
+    const entries = Object.entries(serverUpdateData.files);
+    if (entries.length > 0) {
+      const map = {};
+      for (const [relPath, b64Content] of entries) {
+        const safeRel = validateExtRelPath(relPath);
+        map[safeRel] = base64ToUint8Array(b64Content);
+      }
+      return map;
+    }
+  }
+
+  const downloadUrl = getLatestExtensionZipUrl();
+  const res = await fetch(downloadUrl, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`GitHub 확장 패키지 다운로드 실패 (${res.status})`);
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  return await extractZipArrayBuffer(arrayBuffer);
+}
+
+async function resolveExtensionTargetHandle(rootDirHandle) {
+  try {
+    await rootDirHandle.getFileHandle("manifest.json");
+    return rootDirHandle;
+  } catch (e) {}
+
+  for (const subName of ["RemoteDownloader-Extension", "extension"]) {
+    try {
+      const subHandle = await rootDirHandle.getDirectoryHandle(subName);
+      await subHandle.getFileHandle("manifest.json");
+      return subHandle;
+    } catch (e) {}
+  }
+
+  throw new Error(
+    "선택한 폴더에서 manifest.json을 찾을 수 없습니다. 크롬에 로드된 RemoteDownloader-Extension 폴더를 선택해 주세요."
+  );
+}
+
+async function writeFilesToDirectoryHandle(rootDirHandle, filesMap) {
+  const targetHandle = await resolveExtensionTargetHandle(rootDirHandle);
+
+  for (const [relPath, contentBytes] of Object.entries(filesMap)) {
+    const parts = relPath.split("/").filter(Boolean);
+    let dir = targetHandle;
+    for (let i = 0; i < parts.length - 1; i++) {
+      dir = await dir.getDirectoryHandle(parts[i], { create: true });
+    }
+    const fileHandle = await dir.getFileHandle(parts[parts.length - 1], { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(contentBytes);
+    await writable.close();
+  }
+
+  return targetHandle;
+}
+
+function finalizeExtensionReload(versionLabel) {
+  showPopupToast(`✅ 확장 프로그램(${versionLabel || "최신"}) 파일 갱신 완료! 재로드합니다...`);
+  chrome.storage.local.remove(["lastUpdateCheckTime", "cachedReleaseInfo"]).catch(() => {});
+  setTimeout(() => {
+    try {
+      chrome.runtime.reload();
+    } catch (e) {
+      window.location.reload();
+    }
+  }, 900);
+}
+
+async function openRemoteUpdateModal() {
+  if (!remoteUpdateModal) return;
+  const savedHandle = await getSavedExtDirHandle();
+  if (selectExtFolderUpdateBtn) {
+    selectExtFolderUpdateBtn.disabled = false;
+    selectExtFolderUpdateBtn.textContent = savedHandle
+      ? `⚡ 저장된 폴더(${savedHandle.name})로 즉시 업데이트`
+      : "📁 확장 폴더 선택 후 즉시 업데이트";
+  }
+  if (reselectExtFolderBtn) {
+    reselectExtFolderBtn.classList.toggle("hidden", !savedHandle);
+  }
+  if (remoteUpdateDesc) {
+    const targetTag =
+      (pendingServerUpdateData && pendingServerUpdateData.version) ||
+      (latestReleaseData && latestReleaseData.tag_name) ||
+      "최신 버전";
+    remoteUpdateDesc.textContent = savedHandle
+      ? `원격 서버 환경에서 ${targetTag} 업데이트를 적용하려면 이전에 선택한 '${savedHandle.name}' 폴더 쓰기 권한을 허용해 주세요.`
+      : `원격 서버에 연결되어 있거나 브라우저 확장 폴더가 자동 갱신되지 않았습니다. 내 PC의 확장 폴더를 선택하면 ${targetTag} 파일을 직접 덮어쓰고 재로드합니다.`;
+  }
+  remoteUpdateModal.classList.add("show");
+}
+
+async function performClientFolderUpdate(dirHandle, isInteractive = true) {
+  const filesMap = await fetchLatestExtensionFilesMap(pendingServerUpdateData);
+  const resolvedHandle = await writeFilesToDirectoryHandle(dirHandle, filesMap);
+  await saveExtDirHandle(resolvedHandle);
+
+  const currentVersion = (chrome.runtime.getManifest().version || "0.0.0").trim();
+  const diskVer = await getDiskManifestVersion();
+  const targetVer =
+    (pendingServerUpdateData && pendingServerUpdateData.version) ||
+    (latestReleaseData && latestReleaseData.tag_name) ||
+    "";
+
+  if (
+    diskVer &&
+    (diskVer !== currentVersion || (targetVer && !isNewerVersion(diskVer, targetVer)))
+  ) {
+    if (remoteUpdateModal) remoteUpdateModal.classList.remove("show");
+    finalizeExtensionReload(targetVer || `v${diskVer}`);
+    return true;
+  }
+
+  if (isInteractive) {
+    throw new Error(
+      "선택한 폴더에 파일은 복사되었으나 현재 크롬에 로드된 확장 폴더(manifest.json)가 바뀌지 않았습니다. chrome://extensions 에서 실제 경로를 확인해 주세요."
+    );
+  }
+  return false;
+}
+
+async function handleSelectFolderUpdateClick(forcePicker = false) {
+  if (!window.showDirectoryPicker) {
+    showPopupToast("현재 브라우저에서 폴더 직접 쓰기를 지원하지 않습니다. ZIP 다운로드를 이용해 주세요.", true);
     return;
   }
 
+  const originalText = selectExtFolderUpdateBtn ? selectExtFolderUpdateBtn.textContent : "";
+  if (selectExtFolderUpdateBtn) {
+    selectExtFolderUpdateBtn.disabled = true;
+    selectExtFolderUpdateBtn.textContent = "⏳ 최신 파일 다운로드 및 덮어쓰기 중...";
+  }
+  if (reselectExtFolderBtn) {
+    reselectExtFolderBtn.disabled = true;
+  }
+
+  try {
+    let dirHandle = null;
+    if (!forcePicker) {
+      const saved = await getSavedExtDirHandle();
+      if (saved) {
+        const perm = await saved.requestPermission({ mode: "readwrite" });
+        if (perm === "granted") {
+          dirHandle = saved;
+        }
+      }
+    }
+
+    if (!dirHandle) {
+      dirHandle = await window.showDirectoryPicker({
+        id: "rd_ext_dir",
+        mode: "readwrite",
+      });
+    }
+
+    await performClientFolderUpdate(dirHandle, true);
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      showPopupToast("폴더 선택이 취소되었습니다.");
+    } else {
+      console.error("클라이언트 폴더 직접 업데이트 오류:", err);
+      const errMsg = err && err.message ? err.message : "폴더 업데이트 실패";
+      if (errMsg.includes("manifest.json")) {
+        await clearSavedExtDirHandle();
+      }
+      showPopupToast(errMsg, true);
+    }
+    if (selectExtFolderUpdateBtn) {
+      selectExtFolderUpdateBtn.disabled = false;
+      selectExtFolderUpdateBtn.textContent = originalText || "📁 확장 폴더 선택 후 즉시 업데이트";
+    }
+    if (reselectExtFolderBtn) {
+      reselectExtFolderBtn.disabled = false;
+    }
+  }
+}
+
+/**
+ * 로컬 파이썬 서버(/api/extension/update) 및 클라이언트 폴더 직접 갱신을 통한 원클릭 업데이트 실행
+ */
+async function applyExtensionUpdate() {
+  const serverUrl = normalizeServerUrl(serverUrlInput.value);
   if (!applyUpdateBtn) return;
+
   const originalHtml = applyUpdateBtn.innerHTML;
   applyUpdateBtn.disabled = true;
   applyUpdateBtn.innerHTML = "<span>⏳ 업데이트 중...</span>";
 
-  try {
-    showPopupToast("최신 확장 프로그램 버전을 다운로드 및 갱신 중입니다...");
-    const payload = {};
-    if (latestReleaseData && latestReleaseData.tag_name) {
-      payload.tag_name = latestReleaseData.tag_name;
-    }
-
-    const res = await fetch(`${serverUrl}/api/extension/update`, {
-      method: "POST",
-      credentials: "omit",
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.status === "ok") {
-      showPopupToast("✅ 확장이 최신 버전으로 업데이트되었습니다! 확장 프로그램을 재로드합니다...");
-      // 캐시 삭제
-      await chrome.storage.local.remove(["lastUpdateCheckTime", "cachedReleaseInfo"]);
-      setTimeout(() => {
-        try {
-          chrome.runtime.reload();
-        } catch (e) {
-          window.location.reload();
-        }
-      }, 1200);
-    } else {
-      const errMsg = data.error || data.detail || data.message || (res.status === 401 ? "로그인이 필요합니다." : "업데이트 실패");
-      showPopupToast(errMsg, true);
-      applyUpdateBtn.disabled = false;
-      applyUpdateBtn.innerHTML = originalHtml;
-    }
-  } catch (err) {
-    console.error("원클릭 업데이트 요청 오류:", err);
-    showPopupToast(`업데이트 요청 실패: ${err.message || "서버 통신 오류"}`, true);
-    applyUpdateBtn.disabled = false;
-    applyUpdateBtn.innerHTML = originalHtml;
+  const currentVersion = (chrome.runtime.getManifest().version || "0.0.0").trim();
+  const payload = { extension_id: chrome.runtime.id };
+  if (latestReleaseData && latestReleaseData.tag_name) {
+    payload.tag_name = latestReleaseData.tag_name;
   }
+
+  let serverData = null;
+  const hasPassword = Boolean(passwordInput && passwordInput.value.trim());
+  if (serverUrl && isServerConnected && hasPassword) {
+    try {
+      showPopupToast("최신 확장 프로그램 버전을 확인 및 다운로드 중입니다...");
+      const res = await fetchWithTimeout(
+        `${serverUrl}/api/extension/update`,
+        {
+          method: "POST",
+          credentials: "omit",
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload),
+        },
+        2500
+      );
+      const parsed = await res.json().catch(() => null);
+      if (res.ok && parsed && parsed.status === "ok") {
+        serverData = parsed;
+      }
+    } catch (err) {
+      console.warn("서버 확장 업데이트 API 호출 건너뜀(클라이언트 직접 갱신 시도):", err);
+    }
+  } else {
+    showPopupToast("클라이언트 직접 업데이트를 준비 중입니다...");
+  }
+
+  pendingServerUpdateData = serverData;
+  const targetVer =
+    (serverData && serverData.version) ||
+    (latestReleaseData && latestReleaseData.tag_name) ||
+    "";
+
+  // 1. 로컬 서버가 내 PC의 현재 확장 폴더를 실제로 덮어썼는지 디스크 manifest.json으로 직접 검증
+  const diskVer = await getDiskManifestVersion();
+  if (
+    diskVer &&
+    diskVer !== currentVersion &&
+    (!targetVer || !isNewerVersion(diskVer, targetVer))
+  ) {
+    finalizeExtensionReload(targetVer || `v${diskVer}`);
+    return;
+  }
+
+  // 2. 원격 서버이거나 경로 불일치로 로컬 디스크가 갱신되지 않은 경우: 저장된 폴더 핸들로 무인 갱신 시도
+  try {
+    const savedHandle = await getSavedExtDirHandle();
+    if (savedHandle) {
+      const perm = await savedHandle.queryPermission({ mode: "readwrite" });
+      if (perm === "granted") {
+        const updated = await performClientFolderUpdate(savedHandle, false);
+        if (updated) {
+          return;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("저장된 폴더 핸들 자동 업데이트 실패:", e);
+  }
+
+  // 3. 사용자 폴더 선택/권한 허용 UI 필요 (툴바 팝업에서는 창이 닫히므로 독립 창으로 전환)
+  const params = new URLSearchParams(window.location.search);
+  const isStandaloneUpdate = params.get("standaloneUpdate") === "1";
+
+  applyUpdateBtn.disabled = false;
+  applyUpdateBtn.innerHTML = originalHtml;
+
+  if (!isStandaloneUpdate) {
+    try {
+      await chrome.windows.create({
+        url: chrome.runtime.getURL("popup.html?standaloneUpdate=1"),
+        type: "popup",
+        width: 420,
+        height: 560,
+      });
+      window.close();
+      return;
+    } catch (winErr) {
+      console.warn("독립 업데이트 창 열기 실패, 현재 팝업에서 모달 표시:", winErr);
+    }
+  }
+
+  await openRemoteUpdateModal();
 }

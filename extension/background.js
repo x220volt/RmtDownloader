@@ -587,6 +587,25 @@ async function clearRetroDbContext() {
   }
 }
 
+async function openSettingsPopupWindow() {
+  try {
+    if (chrome.action && typeof chrome.action.openPopup === "function") {
+      await chrome.action.openPopup();
+      return;
+    }
+  } catch (e) {}
+  try {
+    if (chrome.windows && chrome.windows.create) {
+      await chrome.windows.create({
+        url: chrome.runtime.getURL("popup.html?openSettings=1"),
+        type: "popup",
+        width: 410,
+        height: 580,
+      });
+    }
+  } catch (e) {}
+}
+
 // 3. 서버로 URL 전송하는 공통 함수
 async function sendToServer(url, referer = "", extraOptions = {}) {
   let config = {};
@@ -664,7 +683,7 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
           "X-Auth-Password": config.password || "",
         },
         body: JSON.stringify(payload),
-        signal: (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
+        signal: (typeof AbortSignal !== "undefined" && AbortSignal.timeout) ? AbortSignal.timeout(2500) : undefined,
       });
 
       const data = await res.json().catch(() => ({}));
@@ -673,8 +692,9 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
         flashActionBadge("!", "#ef4444");
         showNotification(
           "인증 실패 (401)",
-          "비밀번호가 올바르지 않습니다. 확장 프로그램 아이콘을 클릭하여 비밀번호를 설정하세요."
+          "아이디/비밀번호가 올바르지 않습니다. 설정 창에서 입력해 주세요."
         );
+        await openSettingsPopupWindow();
         return { ok: false, error: "인증 실패 (401)" };
       }
 
@@ -714,8 +734,9 @@ async function sendToServer(url, referer = "", extraOptions = {}) {
   flashActionBadge("!", "#ef4444");
   showNotification(
     "서버 연결 실패",
-    `서버(${serverUrl})에 접속할 수 없습니다. PC 서버가 켜져 있는지 확인하세요.`
+    `서버(${serverUrl})에 접속할 수 없습니다. PC 서버 주소와 연결 상태를 확인하세요.`
   );
+  await openSettingsPopupWindow();
   return { ok: false, error: "서버 연결 실패" };
 }
 

@@ -3047,6 +3047,126 @@ class GigaFileBundleResolverTests(unittest.TestCase):
         self.assertEqual(resolved["filename"], "archive_bundle.zip")
         self.assertEqual(check_ok_call := fake_session.get.call_args_list[1].kwargs["params"], {"file": "0219-bundle", "dlkey": "4321", "is_zip": 1})
 
+    def test_extension_update_prefers_browser_dir_and_returns_files_map(self):
+        import base64
+        import io
+        import os
+        import tempfile
+        import zipfile
+
+        import app as app_module
+        import config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale_dir = root / "stale_ext"
+            browser_dir = root / "browser_ext"
+            stale_dir.mkdir(parents=True, exist_ok=True)
+            browser_dir.mkdir(parents=True, exist_ok=True)
+            (stale_dir / "manifest.json").write_text(
+                json.dumps({"name": "원격 다운로더 (Remote Downloader)", "version": "0.1.62"}),
+                encoding="utf-8",
+            )
+            (browser_dir / "manifest.json").write_text(
+                json.dumps({"name": "원격 다운로더 (Remote Downloader)", "version": "0.1.62"}),
+                encoding="utf-8",
+            )
+
+            fake_localappdata = root / "localappdata"
+            pref_dir = fake_localappdata / "Google" / "Chrome" / "User Data" / "Default"
+            pref_dir.mkdir(parents=True, exist_ok=True)
+            (pref_dir / "Preferences").write_text(
+                json.dumps(
+                    {
+                        "extensions": {
+                            "settings": {
+                                "testid123456": {
+                                    "path": str(browser_dir),
+                                }
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "manifest_version": 3,
+                            "name": "원격 다운로더 (Remote Downloader)",
+                            "version": "0.1.64",
+                        }
+                    ),
+                )
+                zf.writestr("icons/icon16.png", b"\x89PNG\r\n\x1a\n")
+            zip_bytes = zip_buf.getvalue()
+
+            files_map = app_module._extract_extension_files_map(zip_bytes)
+            self.assertEqual(
+                json.loads(base64.b64decode(files_map["manifest.json"]).decode("utf-8"))["version"],
+                "0.1.64",
+            )
+            self.assertIn("icons/icon16.png", files_map)
+
+            bad_zip = io.BytesIO()
+            with zipfile.ZipFile(bad_zip, "w") as zf:
+                zf.writestr("../escape.js", b"alert(1)")
+            with self.assertRaises(ValueError):
+                app_module._extract_extension_files_map(bad_zip.getvalue())
+
+            mock_settings = dict(
+                config.DEFAULT_SETTINGS,
+                auth_enabled=False,
+                extension_dir=str(stale_dir),
+            )
+            mock_rel_resp = Mock(status_code=200)
+            mock_rel_resp.json.return_value = {
+                "tag_name": "v0.1.64",
+                "assets": [
+                    {
+                        "name": "RemoteDownloader-Extension.zip",
+                        "browser_download_url": "https://github.com/x220volt/RmtDownloader/releases/download/v0.1.64/RemoteDownloader-Extension.zip",
+                    }
+                ],
+            }
+            mock_zip_resp = Mock(status_code=200, content=zip_bytes)
+
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(fake_localappdata)}), patch.object(
+                app_module, "load_settings", return_value=mock_settings
+            ), patch.object(app_module, "save_settings"), patch.object(
+                app_module,
+                "_get_standard_extension_candidates",
+                return_value=[stale_dir],
+            ), patch("requests.get", side_effect=[mock_rel_resp, mock_zip_resp]):
+                resolved_dir = app_module._get_extension_dir(ext_id="testid123456")
+                self.assertEqual(resolved_dir, browser_dir.resolve())
+
+                client = app_module.app.test_client()
+                resp = client.post(
+                    "/api/extension/update",
+                    json={"extension_id": "testid123456"},
+                )
+
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body["status"], "ok")
+            self.assertEqual(body["version"], "v0.1.64")
+            self.assertIn("manifest.json", body["files"])
+            self.assertIn(str(browser_dir.resolve()), body["updated_dirs"])
+            self.assertIn(str(stale_dir.resolve()), body["updated_dirs"])
+            self.assertEqual(
+                json.loads((browser_dir / "manifest.json").read_text(encoding="utf-8"))["version"],
+                "0.1.64",
+            )
+            self.assertEqual(
+                json.loads((stale_dir / "manifest.json").read_text(encoding="utf-8"))["version"],
+                "0.1.64",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
