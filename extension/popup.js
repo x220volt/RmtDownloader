@@ -128,8 +128,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  if (openSettingsParam && settingsModal) {
+  const needsInitialSetup = !passwordInput || !passwordInput.value.trim();
+  let autoOpenedInitialSettings = false;
+  if ((openSettingsParam || needsInitialSetup) && settingsModal) {
+    autoOpenedInitialSettings = needsInitialSetup && !openSettingsParam;
+    if (autoOpenedInitialSettings) {
+      settingsModal.addEventListener(
+        "input",
+        () => {
+          autoOpenedInitialSettings = false;
+        },
+        true
+      );
+    }
     settingsModal.classList.add("show");
+    if (
+      serverUrlInput &&
+      document.activeElement !== usernameInput &&
+      document.activeElement !== passwordInput
+    ) {
+      try {
+        serverUrlInput.focus();
+      } catch (e) {}
+    }
   }
 
   await tryAutoFillFromClipboard();
@@ -140,6 +161,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const isConnected = await checkConnection();
   if (isConnected) {
+    if (autoOpenedInitialSettings && settingsModal) {
+      settingsModal.classList.remove("show");
+    }
     await fetchJobs();
     startPolling();
   }
@@ -603,20 +627,26 @@ async function checkConnection() {
 
   if (!serverUrl) {
     serverUrl = "http://127.0.0.1:7971";
-    serverUrlInput.value = serverUrl;
+    if (serverUrlInput && document.activeElement !== serverUrlInput) {
+      serverUrlInput.value = serverUrl;
+    }
   }
 
+  const isDefaultLocalUrl =
+    serverUrl === "http://127.0.0.1:7971" || serverUrl === "http://localhost:7971";
   const urlsToTry = [serverUrl];
-  if (serverUrl.includes("localhost")) {
-    urlsToTry.push(serverUrl.replace("localhost", "127.0.0.1"));
-  } else if (serverUrl.includes("127.0.0.1")) {
-    urlsToTry.push(serverUrl.replace("127.0.0.1", "localhost"));
+  if (!isDefaultLocalUrl) {
+    if (serverUrl.includes("localhost")) {
+      urlsToTry.push(serverUrl.replace("localhost", "127.0.0.1"));
+    } else if (serverUrl.includes("127.0.0.1")) {
+      urlsToTry.push(serverUrl.replace("127.0.0.1", "localhost"));
+    }
   }
 
   let lastStatus = 0;
   for (const testUrl of urlsToTry) {
     try {
-      const timeoutMs = (testUrl.includes("127.0.0.1") || testUrl.includes("localhost")) ? 1200 : 2000;
+      const timeoutMs = (testUrl.includes("127.0.0.1") || testUrl.includes("localhost")) ? 800 : 1500;
       const res = await fetchWithTimeout(
         `${testUrl}/api/auth/test`,
         {
@@ -636,7 +666,9 @@ async function checkConnection() {
 
       if (res.ok) {
         if (testUrl !== serverUrl) {
-          serverUrlInput.value = testUrl;
+          if (serverUrlInput && document.activeElement !== serverUrlInput) {
+            serverUrlInput.value = testUrl;
+          }
           setStorageConfig({ serverUrl: testUrl });
         }
         const data = await res.json().catch(() => ({}));
@@ -1482,22 +1514,17 @@ async function tryAutoFillFromClipboard() {
     const config = await getStorageConfig();
     if (config.clipboardAutoFill === false) return;
     if (!manualUrlInput || manualUrlInput.value.trim() !== "") return;
-    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") return;
-
-    const clipRaw = await Promise.race([
-      navigator.clipboard.readText().catch(() => ""),
-      new Promise((resolve) => setTimeout(() => resolve(""), 400)),
-    ]);
-    const clipText = (clipRaw || "").trim();
-    if (!clipText) return;
 
     const stored = await new Promise((resolve) => {
       try {
         if (chrome.storage && chrome.storage.local) {
-          chrome.storage.local.get(["lastSentClipboardText"], (items) => {
-            void chrome.runtime.lastError;
-            resolve(items || {});
-          });
+          chrome.storage.local.get(
+            ["lastCopiedClipboardText", "lastCopiedClipboardAt", "lastSentClipboardText"],
+            (items) => {
+              void chrome.runtime.lastError;
+              resolve(items || {});
+            }
+          );
         } else {
           resolve({});
         }
@@ -1505,6 +1532,14 @@ async function tryAutoFillFromClipboard() {
         resolve({});
       }
     });
+
+    const clipText = (stored.lastCopiedClipboardText || "").trim();
+    if (!clipText) return;
+
+    const copiedAt = Number(stored.lastCopiedClipboardAt || 0);
+    if (!copiedAt || Date.now() - copiedAt > 30 * 60 * 1000) {
+      return;
+    }
 
     if (stored.lastSentClipboardText && stored.lastSentClipboardText === clipText) {
       return;
@@ -1523,9 +1558,9 @@ async function tryAutoFillFromClipboard() {
       manualPasswordInput.value = parsed.password;
     }
     autoFilledClipboardRawText = clipText;
-    showPopupToast(`📋 클립보드에서 ${parsed.urls.length}개의 다운로드 링크를 불러왔습니다.`);
+    showPopupToast(`📋 복사한 ${parsed.urls.length}개의 다운로드 링크를 불러왔습니다.`);
   } catch (e) {
-    // 클립보드 읽기 거부/비어있음 등은 조용히 무시
+    // 저장된 클립보드 캐시 읽기 실패 등은 조용히 무시
   }
 }
 

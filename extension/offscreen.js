@@ -12,21 +12,9 @@
   let baselineInitialized = false;
 
   function readClipboardText() {
-    const area = document.getElementById("clipboardArea");
-    if (!area) return "";
-    try {
-      area.value = "";
-      area.focus();
-      const pasted = document.execCommand("paste");
-      const text = pasted ? (area.value || "").trim() : "";
-      area.value = "";
-      if (text.length > MAX_CLIPBOARD_LENGTH) {
-        return "";
-      }
-      return text;
-    } catch (e) {
-      return "";
-    }
+    // RDP(rdpclip.exe) 환경 등에서 UI 스레드 블로킹 및 포커스 탈취를 유발하는
+    // 주기적 execCommand("paste") 폴링을 비활성화했습니다.
+    return "";
   }
 
   function pollClipboard(forceReport = false) {
@@ -61,13 +49,6 @@
     } catch (e) {}
     return text;
   }
-
-  // 시작 시 기존 클립보드 내용을 기준값으로 기록하여 불필요한 초기 팝업 방지
-  pollClipboard(false);
-
-  setInterval(() => {
-    pollClipboard(false);
-  }, POLL_INTERVAL_MS);
 
   chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (!request) return false;

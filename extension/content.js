@@ -1081,15 +1081,29 @@
   }
 
   function onCopyEvent(event) {
-    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
-
-    scheduleClipboardCheck();
+    if (isRemoteDownloaderDashboard()) return;
 
     const rawText = getSelectedCopyText(event);
     if (!rawText) return;
 
     const parsed = parseDownloadableClipboardText(rawText);
     if (!parsed) return;
+
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set(
+          {
+            lastCopiedClipboardText: rawText,
+            lastCopiedClipboardAt: Date.now(),
+          },
+          () => {
+            void chrome.runtime.lastError;
+          }
+        );
+      }
+    } catch (e) {}
+
+    if (!clipboardPromptEnabled) return;
 
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => {
@@ -1119,8 +1133,6 @@
 
   function onClickEvent(event) {
     captureRetroDbContextFromEvent(event);
-    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
-    scheduleClipboardCheck();
   }
 
   function onAuxClickEvent(event) {
@@ -1128,8 +1140,7 @@
   }
 
   function onContextMenuEvent() {
-    if (!clipboardPromptEnabled || isRemoteDownloaderDashboard()) return;
-    scheduleClipboardCheck();
+    // 백그라운드 클립보드 폴링을 사용하지 않습니다.
   }
 
   function onRuntimeMessage(request, _sender, sendResponse) {

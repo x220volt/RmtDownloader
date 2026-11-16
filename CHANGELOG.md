@@ -4,6 +4,15 @@
 
 ---
 
+## [v0.1.65] - 2026-11-16
+- **🐛 버그 수정**:
+  - **원격 데스크톱(RDP) 및 미설정 상태에서 크롬 확장 팝업 프리징/입력 멈춤 해결 (`extension/offscreen.js`, `extension/background.js`, `extension/content.js`, `extension/popup.js`)**:
+    - 팝업과 동일한 확장 렌더러 프로세스를 공유하던 `offscreen.js`의 800ms 주기 `area.focus()` + `document.execCommand("paste")` 클립보드 폴링을 제거하고, `background.js` 기동 시 기존 `offscreen.html` 문서를 닫도록 수정해 RDP(`rdpclip.exe`) 환경에서도 팝업 입력창 프리징·포커스 탈취가 발생하지 않도록 했습니다.
+    - `popup.js`의 `navigator.clipboard.readText()` 직접 호출 대신 `content.js`의 `copy` 이벤트 시 `chrome.storage.local`(`lastCopiedClipboardText`)에 캐시한 복사 링크를 안전하게 읽어오도록 전환했습니다.
+    - 비밀번호 미입력 초기 상태에서는 `#settingsModal`을 즉시 열어 바로 서버 주소·아이디·비밀번호를 입력할 수 있게 했으며, `checkConnection()` 기본 로컬 URL 타임아웃을 `800ms`(원격 `1500ms`)로 단축해 연결 확인 중 입력이 덮어씌워지거나 멈추지 않도록 개선했습니다.
+
+---
+
 ## [v0.1.64] - 2026-11-16
 - **🐛 버그 수정 및 개선**:
   - **원격/다중 경로 크롬 확장 프로그램 원클릭 업데이트 개선 (`app.py`, `extension/popup.html`, `extension/popup.css`, `extension/popup.js`)**:

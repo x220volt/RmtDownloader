@@ -236,6 +236,14 @@ async function hasOffscreenDocument() {
   return false;
 }
 
+async function closeOffscreenDocumentIfOpen() {
+  try {
+    if (chrome.offscreen && typeof chrome.offscreen.closeDocument === "function") {
+      await chrome.offscreen.closeDocument();
+    }
+  } catch (e) {}
+}
+
 async function ensureOffscreenDocument() {
   if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== "function") {
     return { open: false, created: false };
@@ -466,19 +474,19 @@ chrome.runtime.onInstalled.addListener(() => {
     });
   });
 
-  ensureOffscreenDocument().catch(() => {});
+  closeOffscreenDocumentIfOpen();
   injectContentScriptToExistingTabs(true).catch(() => {});
 });
 
 if (chrome.runtime.onStartup) {
   chrome.runtime.onStartup.addListener(() => {
-    ensureOffscreenDocument().catch(() => {});
+    closeOffscreenDocumentIfOpen();
     injectContentScriptToExistingTabs(true).catch(() => {});
   });
 }
 
-// Service Worker 기동 시에도 오프스크린 클립보드 감시 및 기존 탭 주입 보장
-ensureOffscreenDocument().catch(() => {});
+// Service Worker 기동 시 기존 오프스크린 문서 정리 및 기존 탭 주입 보장
+closeOffscreenDocumentIfOpen();
 injectContentScriptToExistingTabs(false).catch(() => {});
 
 // 2. 우클릭 메뉴 클릭 이벤트 핸들러
@@ -788,23 +796,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === "checkClipboardNow") {
-    (async () => {
-      const state = await ensureOffscreenDocument();
-      if (!state.open) {
-        return { ok: false, reason: "no_offscreen" };
-      }
-      const resp = await chrome.runtime
-        .sendMessage({ action: "offscreenCheckClipboard" })
-        .catch(() => null);
-      if (resp && resp.text) {
-        await queueClipboardDetection(resp.text);
-        return { ok: true, found: true };
-      }
-      return { ok: true, found: false };
-    })()
-      .then((res) => sendResponse(res))
-      .catch((err) => sendResponse({ ok: false, error: err ? err.message : "unknown" }));
-    return true;
+    sendResponse({ ok: true, found: false });
+    return false;
   }
 
   if (request.action === "clipboardChanged") {
