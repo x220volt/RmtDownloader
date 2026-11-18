@@ -15,7 +15,7 @@ from downloader.url_helper import clean_url, parse_download_candidates, with_pas
 
 class ConfigurationTests(unittest.TestCase):
     def test_atomic_save_and_invalid_values(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "settings.json"
             with patch.object(config, "CONFIG_FILE", target):
                 config.save_settings(
@@ -30,7 +30,7 @@ class ConfigurationTests(unittest.TestCase):
                 self.assertEqual(list(Path(folder).glob("*.tmp")), [])
 
     def test_invalid_file_and_read_without_directory_creation(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "settings.json"
             target.write_text("[]")
             with (
@@ -75,7 +75,7 @@ class EngineTests(unittest.TestCase):
         return response
 
     def test_incomplete_body_is_not_published(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             response = self.response(headers={"Content-Length": "10"})
             with patch("downloader.engine.requests.Session") as factory:
                 factory.return_value.get.return_value = response
@@ -85,7 +85,7 @@ class EngineTests(unittest.TestCase):
                 factory.return_value.close.assert_called()
 
     def test_independent_partial_files_and_unique_final_names(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "a.bin").write_bytes(b"original")
             for identifier in ("one", "two"):
                 with patch("downloader.engine.requests.Session") as factory:
@@ -101,7 +101,7 @@ class EngineTests(unittest.TestCase):
             self.assertEqual((Path(folder) / "a (2).bin").read_bytes(), b"abc")
 
     def test_resume_keeps_extensionless_partial(self):
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "file.id.part").write_bytes(b"ab")
             response = self.response(
                 206,
@@ -123,7 +123,7 @@ class EngineTests(unittest.TestCase):
 
     def test_html_content_type_fails_and_cleans_up(self):
         """Content-Type이 text/html인 경우 다운로드 실패로 처리되고 part 파일이 정리되어야 함."""
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             response = self.response(
                 200,
                 {"Content-Type": "text/html; charset=utf-8", "Content-Length": "100"},
@@ -142,7 +142,7 @@ class EngineTests(unittest.TestCase):
 
     def test_html_chunk_body_fails_and_cleans_up(self):
         """Content-Type이 일반 octet-stream이더라도 첫 청크가 HTML/Cloudflare 챌린지면 실패해야 함."""
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             html_body = b"<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>challenges.cloudflare.com</body></html>"
             response = self.response(
                 200,
@@ -312,7 +312,7 @@ class TransferTests(unittest.TestCase):
         def stream(*args, **kwargs):
             yield response
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             (Path(folder) / "file.bin").write_bytes(b"original")
             (Path(folder) / "file.bin.id.part").write_bytes(plain[:16])
             with (
@@ -664,7 +664,7 @@ class ResolverLifecycleTests(unittest.TestCase):
 
         client = app.test_client()
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             temp_config = Path(folder) / "settings.json"
             temp_config.write_text(
                 json.dumps(config.DEFAULT_SETTINGS, ensure_ascii=False),
@@ -724,7 +724,7 @@ class ResolverLifecycleTests(unittest.TestCase):
 
         client = app.test_client()
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             temp_config = Path(folder) / "settings.json"
             temp_config.write_text(
                 json.dumps(config.DEFAULT_SETTINGS, ensure_ascii=False),
@@ -763,7 +763,7 @@ class ResolverLifecycleTests(unittest.TestCase):
         # 1. 기본 포트 검증
         self.assertEqual(config.DEFAULT_SETTINGS["port"], 7971)
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             temp_config = Path(folder) / "settings.json"
             temp_config.write_text(
                 json.dumps(config.DEFAULT_SETTINGS, ensure_ascii=False),
@@ -1092,9 +1092,7 @@ class ResolverLifecycleTests(unittest.TestCase):
 
         import os
 
-        with tempfile.TemporaryDirectory(
-            dir=Path(__file__).resolve().parent
-        ) as tmp_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir:
             temp_cfg = Path(tmp_dir) / "settings.json"
             with patch.object(config, "CONFIG_FILE", temp_cfg):
                 config.save_settings(
@@ -2727,7 +2725,7 @@ class HtmlAttachmentAndKonePageTests(unittest.TestCase):
         resp.iter_content.return_value = [html_bytes]
         resp.close = Mock()
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             with patch("downloader.engine.requests.Session") as factory:
                 factory.return_value.get.return_value = resp
                 result = DownloadTask(
@@ -2746,7 +2744,7 @@ class HtmlAttachmentAndKonePageTests(unittest.TestCase):
         resp.iter_content.return_value = [b"<html><body>File expired</body></html>"]
         resp.close = Mock()
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             with patch("downloader.engine.requests.Session") as factory:
                 factory.return_value.get.return_value = resp
                 result = DownloadTask(
@@ -2770,7 +2768,7 @@ class HtmlAttachmentAndKonePageTests(unittest.TestCase):
         resp.iter_content.return_value = [cf_bytes]
         resp.close = Mock()
 
-        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
+        with tempfile.TemporaryDirectory() as folder:
             with patch("downloader.engine.requests.Session") as factory:
                 factory.return_value.get.return_value = resp
                 result = DownloadTask(
