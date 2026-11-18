@@ -1011,7 +1011,8 @@ def canonical_url_key(url: str) -> str:
                     and gh_repo
                     and not gh_owner.startswith(".")
                     and gh_owner not in _RESERVED_OWNERS
-                    and (
+                ):
+                    if (
                         len(segs) == 2
                         or (len(segs) == 3 and segs[2].lower() == "releases")
                         or (
@@ -1019,9 +1020,14 @@ def canonical_url_key(url: str) -> str:
                             and segs[2].lower() == "releases"
                             and segs[3].lower() == "latest"
                         )
-                    )
-                ):
-                    return f"github:{gh_owner}/{gh_repo}:latest"
+                    ):
+                        return f"github:{gh_owner}/{gh_repo}:latest"
+                    if len(segs) == 4 and segs[2].lower() == "releases" and segs[3].lower() == "tag":
+                        pass
+                    elif len(segs) == 5 and segs[2].lower() == "releases" and segs[3].lower() == "tag":
+                        return f"github:{gh_owner}/{gh_repo}:tag:{segs[4].lower()}"
+                    elif len(segs) >= 6 and segs[2].lower() == "releases" and segs[3].lower() == "download":
+                        return f"github:{gh_owner}/{gh_repo}:dl:{segs[4].lower()}:{segs[5].lower()}"
 
         # 일반 웹 다운로드 URL: 트래킹/불필요 쿼리 파라미터 제외하고 정규화
         if parsed.query:
@@ -1038,3 +1044,29 @@ def canonical_url_key(url: str) -> str:
         return f"{host}{path}"
     except Exception:
         return cleaned.lower()
+
+
+def is_github_release_asset_of_tag(asset_url: str, tag_url: str) -> bool:
+    """GitHub 에셋 다운로드 링크(releases/download/<tag>/<file>)가 특정 릴리스 태그 페이지(releases/tag/<tag>)에 속하는지 확인합니다."""
+    if not asset_url or not tag_url:
+        return False
+    try:
+        p1 = urlparse(clean_url(asset_url))
+        p2 = urlparse(clean_url(tag_url))
+        if "github.com" not in (p1.hostname or "").lower() or "github.com" not in (
+            p2.hostname or ""
+        ).lower():
+            return False
+        m1 = re.match(r"^/([^/]+)/([^/]+)/releases/download/([^/]+)/", p1.path)
+        m2 = re.match(r"^/([^/]+)/([^/]+)/releases/tag/([^/]+)", p2.path)
+        if m1 and m2:
+            o1, r1, t1 = m1.groups()
+            o2, r2, t2 = m2.groups()
+            return (
+                o1.lower() == o2.lower()
+                and r1.lower() == r2.lower()
+                and t1.lower() == t2.lower()
+            )
+    except Exception:
+        pass
+    return False

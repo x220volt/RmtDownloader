@@ -222,6 +222,21 @@ def _validate_file_response(response, url, filename: str = ""):
     explicit_html = is_attachment and _is_html_filename(header_filename)
     if is_html_ct and not explicit_html:
         raise ValueError("다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.")
+
+    is_json_ct = content_type in ("application/json", "text/json")
+    target_name = header_filename or filename or ""
+    clean_target = target_name.split("?")[0].split("#")[0].strip().lower()
+    explicit_json = clean_target.endswith(".json")
+    if is_json_ct and not explicit_json:
+        err_msg = ""
+        try:
+            err_data = response.json()
+            if isinstance(err_data, dict) and "message" in err_data:
+                err_msg = f": {err_data['message']}"
+        except Exception:
+            pass
+        raise ValueError(f"다운로드 파일 대신 서버 API 응답(JSON)이 수신되었습니다{err_msg}.")
+
     return content_type, explicit_html
 
 

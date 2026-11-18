@@ -23,6 +23,7 @@ from .engine import (
     format_bytes,
     format_eta,
     format_speed,
+    sanitize_filename,
     sanitize_folder_name,
 )
 from .transfer_policy import HttpTransferPolicy
@@ -667,6 +668,61 @@ class DownloadManager:
 
         return False, "", None
 
+    def _is_duplicate_in_group(
+        self,
+        group_id: str,
+        url: str,
+        filename: str = "",
+        dest_dir: str = "",
+        exclude_job_id: str = "",
+    ) -> bool:
+        """한건의 다운로드(동일 group_id) 내에서 이미 대기, 다운로드 중이거나 완료된 중복 링크/파일인지 확인합니다."""
+        if not group_id:
+            return False
+
+        from .url_helper import canonical_url_key, clean_url
+
+        target_clean_url = clean_url(url) if url else ""
+        target_canonical = canonical_url_key(url) if url else ""
+        target_fn = sanitize_filename(filename).strip().lower() if filename else ""
+        target_dir = os.path.abspath(dest_dir).lower() if dest_dir else ""
+
+        with self._lock:
+            for job in self.jobs.values():
+                if job.id == exclude_job_id:
+                    continue
+                if job.options.get("group_id") != group_id:
+                    continue
+                if job.status in ("cancelled", "failed"):
+                    continue
+
+                # 1. URL 비교 (clean_url 또는 canonical_url_key)
+                if target_clean_url or target_canonical:
+                    job_urls = []
+                    if job.original_url:
+                        job_urls.append(job.original_url)
+                    if job.resolved_url:
+                        job_urls.append(job.resolved_url)
+                    for extra_u in job.options.get("_registered_urls", []):
+                        job_urls.append(extra_u)
+
+                    for u in job_urls:
+                        if not u:
+                            continue
+                        if target_clean_url and clean_url(u) == target_clean_url:
+                            return True
+                        if target_canonical and canonical_url_key(u) == target_canonical:
+                            return True
+
+                # 2. 동일 대상 폴더 내 동일 파일명 비교
+                if target_fn and target_dir and job.filename:
+                    job_dir = os.path.abspath(job.download_dir).lower()
+                    job_fn = sanitize_filename(job.filename).strip().lower()
+                    if job_dir == target_dir and job_fn == target_fn:
+                        return True
+
+        return False
+
     def clear_history(self) -> int:
         """다운로드 완료 히스토리를 비웁니다."""
         with self._lock:
@@ -766,6 +822,8 @@ class DownloadManager:
             job_options["subfolder"] = subfolder
 
         job = DownloadJob(url=url, download_dir=download_dir, options=job_options)
+        if "group_id" not in job.options or not job.options["group_id"]:
+            job.options["group_id"] = job.id
         if filename:
             job.filename = filename
         with self._lock:
@@ -1276,12 +1334,36 @@ class DownloadManager:
         self, job_id: str, job: DownloadJob, resolved: dict
     ) -> None:
         """해석 결과에 포함된 다중 첨부파일(`files`) 및 후속 작업(`extra_jobs`)을 큐에 등록합니다."""
+        group_id = job.options.get("group_id") or job.id
+        job.options["group_id"] = group_id
+
+        # 현재 작업의 URL 및 파일명 등록
+        if job.original_url:
+            job.options.setdefault("_registered_urls", []).append(job.original_url)
+        if job.resolved_url:
+            job.options.setdefault("_registered_urls", []).append(job.resolved_url)
+
         extra_files = resolved.get("files", [])
         if len(extra_files) > 1:
             logger.info(
                 f"다중 첨부파일 감지: 추가 {len(extra_files) - 1}개 파일을 큐에 자동 등록합니다 (폴더: {job.download_dir})."
             )
             for extra in extra_files[1:]:
+                extra_url = extra.get("url", "")
+                extra_name = extra.get("name", "")
+                if self._is_duplicate_in_group(
+                    group_id,
+                    extra_url,
+                    filename=extra_name,
+                    dest_dir=job.download_dir,
+                ):
+                    logger.info(
+                        "한건의 다운로드 내 중복 파일 자동 제외: %s (%s)",
+                        extra_name,
+                        extra_url,
+                    )
+                    continue
+
                 extra_opts = dict(job.options)
                 for key in (
                     "headers",
@@ -1293,6 +1375,7 @@ class DownloadManager:
                     if key in resolved:
                         extra_opts[key] = resolved[key]
                 extra_opts["subfolder_applied"] = True
+                extra_opts["group_id"] = group_id
                 for key in ("referer", "headers", "cookies"):
                     if key in extra:
                         extra_opts[key] = extra[key]
@@ -1301,9 +1384,21 @@ class DownloadManager:
                     download_dir=job.download_dir,
                     options=extra_opts,
                 )
-                new_job.filename = extra.get("name", "")
+                new_job.filename = extra_name
                 new_job.resolved_url = extra["url"]
                 new_job.service_name = resolved.get("source_service", "Direct")
+                new_job.options["_pre_resolved"] = {
+                    "url": extra["url"],
+                    "filename": extra_name,
+                    "file_size": extra.get("size"),
+                    "headers": extra_opts.get("headers"),
+                    "cookies": extra_opts.get("cookies"),
+                    "referer": extra_opts.get("referer"),
+                    "source_service": resolved.get("source_service", "Direct"),
+                }
+                new_job.options.setdefault("_registered_urls", []).append(extra["url"])
+                job.options.setdefault("_registered_urls", []).append(extra["url"])
+
                 with self._lock:
                     if (
                         self.jobs.get(job_id) is not job
@@ -1315,14 +1410,32 @@ class DownloadManager:
                     self.queue.put(new_job.id)
 
         for extra in resolved.get("extra_jobs", []):
+            extra_url = extra.get("url", "")
+            extra_name = extra.get("filename", "")
+            if self._is_duplicate_in_group(
+                group_id,
+                extra_url,
+                filename=extra_name,
+                dest_dir=job.download_dir,
+            ):
+                logger.info(
+                    "한건의 다운로드 내 중복 후속 작업 자동 제외: %s (%s)",
+                    extra_name,
+                    extra_url,
+                )
+                continue
+
             with self._lock:
                 if self.jobs.get(job_id) is not job or job.status != "downloading":
                     break
                 extra_opts = dict(job.options)
                 extra_opts.update(extra.get("options", {}))
                 extra_opts["subfolder_applied"] = True
-                new_job = DownloadJob(extra["url"], job.download_dir, extra_opts)
-                new_job.filename = extra.get("filename", "")
+                extra_opts["group_id"] = group_id
+                new_job = DownloadJob(extra_url, job.download_dir, extra_opts)
+                new_job.filename = extra_name
+                new_job.options.setdefault("_registered_urls", []).append(extra_url)
+                job.options.setdefault("_registered_urls", []).append(extra_url)
                 self.jobs[new_job.id] = new_job
                 self._broadcast("job_added", new_job.to_dict())
                 self.queue.put(new_job.id)
@@ -1595,6 +1708,83 @@ class DownloadManager:
 
                 self._apply_subfolder_and_capture(job, resolved, settings)
 
+                group_id = job.options.get("group_id") or job.id
+                job.options["group_id"] = group_id
+
+                # 동일 다운로드 그룹(group_id) 내 중복 파일/직링크 검사 및 필터링
+                if resolved.get("files"):
+                    unique_files = []
+                    for f in resolved["files"]:
+                        f_url = f.get("url", "")
+                        f_name = f.get("name", "")
+                        if self._is_duplicate_in_group(
+                            group_id,
+                            f_url,
+                            filename=f_name,
+                            dest_dir=job.download_dir,
+                            exclude_job_id=job.id,
+                        ):
+                            logger.info(
+                                "한건의 다운로드 내 중복 파일 자동 제외: %s (%s)",
+                                f_name,
+                                f_url,
+                            )
+                            continue
+                        unique_files.append(f)
+
+                    if not unique_files:
+                        logger.info(
+                            "작업 %s의 모든 파일이 동일 다운로드 내에서 이미 처리되었습니다 -> 다운로드 스킵 및 완료 처리",
+                            job.id,
+                        )
+                        with self._lock:
+                            job.status = "completed"
+                            job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            job.error_message = "동일 다운로드 내 이미 완료된 중복 파일로 자동 제외됨"
+                            job.progress = 100.0
+                            job.speed_bps = 0.0
+                            job.speed_str = "완료"
+                            self._save_jobs()
+                            self._broadcast("job_updated", job.to_dict())
+                            self._broadcast("stats_updated", self.get_stats())
+                        job.thread = None
+                        self.queue.task_done()
+                        continue
+
+                    resolved["files"] = unique_files
+                    if resolved["files"][0]["url"] != resolved.get("url"):
+                        resolved["url"] = resolved["files"][0]["url"]
+                        resolved["filename"] = resolved["files"][0].get("name", "")
+                        resolved["file_size"] = resolved["files"][0].get("size")
+                else:
+                    r_url = resolved.get("url") or job.original_url
+                    r_name = resolved.get("filename") or job.filename
+                    if self._is_duplicate_in_group(
+                        group_id,
+                        r_url,
+                        filename=r_name,
+                        dest_dir=job.download_dir,
+                        exclude_job_id=job.id,
+                    ):
+                        logger.info(
+                            "작업 %s가 동일 다운로드 내 이미 처리된 중복 링크입니다 (%s) -> 다운로드 스킵 및 완료 처리",
+                            job.id,
+                            r_url,
+                        )
+                        with self._lock:
+                            job.status = "completed"
+                            job.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            job.error_message = "동일 다운로드 내 이미 완료된 중복 링크로 자동 제외됨"
+                            job.progress = 100.0
+                            job.speed_bps = 0.0
+                            job.speed_str = "완료"
+                            self._save_jobs()
+                            self._broadcast("job_updated", job.to_dict())
+                            self._broadcast("stats_updated", self.get_stats())
+                        job.thread = None
+                        self.queue.task_done()
+                        continue
+
                 with self._lock:
                     if (
                         self._stop_event.is_set()
@@ -1608,6 +1798,7 @@ class DownloadManager:
                     job.resolved_url = resolved["url"]
                     if resolved.get("filename"):
                         job.filename = resolved["filename"]
+                    job.options.setdefault("_registered_urls", []).append(resolved["url"])
                     resolved_source_title = str(
                         resolved.get("article_title") or ""
                     ).strip()
@@ -1626,7 +1817,13 @@ class DownloadManager:
                         job.options["method"] = resolved["method"]
                     if resolved.get("post_data"):
                         job.options["post_data"] = resolved["post_data"]
-                    for key in ("allow_parallel", "max_connections"):
+                    for key in (
+                        "allow_parallel",
+                        "max_connections",
+                        "headers",
+                        "cookies",
+                        "referer",
+                    ):
                         if key in resolved:
                             job.options[key] = resolved[key]
                     job.status = "downloading"

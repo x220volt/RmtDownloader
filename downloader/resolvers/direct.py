@@ -26,15 +26,23 @@ class DirectResolver(BaseResolver):
         url = url.strip()
         parsed = urlparse(url)
         path = unquote(parsed.path or "")
-        filename = (options or {}).get("filename") or os.path.basename(path)
+        opts = options or {}
+        filename = opts.get("filename") or os.path.basename(path)
         if "?" in filename:
             filename = filename.split("?")[0]
+
+        headers = {"User-Agent": DEFAULT_USER_AGENT}
+        if isinstance(opts.get("headers"), dict):
+            headers.update(opts["headers"])
+
+        cookies = opts.get("cookies") or ""
+        referer = opts.get("referer") or ""
 
         return {
             "url": url,
             "filename": filename,
-            "headers": {"User-Agent": DEFAULT_USER_AGENT},
-            "cookies": "",
-            "referer": "",
+            "headers": headers,
+            "cookies": cookies,
+            "referer": referer,
             "source_service": "Direct",
         }

@@ -811,7 +811,30 @@ class WebPageResolver(BaseResolver):
                         extra_opts=sc_opts,
                     )
 
-        return post_title, cloud_candidates + direct_file_candidates
+        # GitHub 릴리스 태그 페이지와 해당 태그의 개별 에셋 직링크가 공존하는 경우,
+        # 릴리스 태그 페이지가 모든 에셋을 포함하므로 중복 다운로드를 방지하기 위해 태그 페이지를 우선 유지
+        from ..url_helper import is_github_release_asset_of_tag
+
+        raw_candidates = cloud_candidates + direct_file_candidates
+        tag_urls = [
+            c["url"]
+            for c in raw_candidates
+            if "/releases/tag/" in c.get("url", "").lower()
+        ]
+        filtered_candidates = []
+        for c in raw_candidates:
+            c_url = c.get("url", "")
+            if "/releases/download/" in c_url.lower():
+                if any(
+                    is_github_release_asset_of_tag(c_url, t_url) for t_url in tag_urls
+                ):
+                    logger.info(
+                        f"[WebPageResolver] 릴리스 태그 페이지가 이미 존재하므로 중복 에셋 링크 제외: {c_url}"
+                    )
+                    continue
+            filtered_candidates.append(c)
+
+        return post_title, filtered_candidates
 
     def resolve_from_html(
         self,
@@ -872,14 +895,30 @@ class WebPageResolver(BaseResolver):
                 resolved.setdefault("article_title", post_title)
                 resolved.setdefault("subfolder", post_title)
 
-                # 게시글 내 추가 다운로드 링크가 더 있다면 extra_jobs로 함께 큐에 등록
+                # 게시글 내 추가 다운로드 링크가 더 있다면 extra_jobs로 함께 큐에 등록 (중복 제거)
                 remaining = all_candidates[idx + 1 :]
                 if remaining:
+                    from ..url_helper import canonical_url_key
+
                     extra_jobs = list(resolved.get("extra_jobs") or [])
+                    seen_urls_in_post = {
+                        canonical_url_key(cand_url) or cand_url,
+                        canonical_url_key(resolved.get("url", ""))
+                        or resolved.get("url", ""),
+                    }
+                    for ej in extra_jobs:
+                        ej_u = ej.get("url", "")
+                        seen_urls_in_post.add(canonical_url_key(ej_u) or ej_u)
+
                     for rem in remaining:
+                        rem_u = rem.get("url", "")
+                        rem_key = canonical_url_key(rem_u) or rem_u
+                        if rem_key in seen_urls_in_post:
+                            continue
+                        seen_urls_in_post.add(rem_key)
                         extra_jobs.append(
                             {
-                                "url": rem["url"],
+                                "url": rem_u,
                                 "filename": rem.get("name", ""),
                                 "options": rem.get("options") or {},
                             }

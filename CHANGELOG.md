@@ -4,6 +4,19 @@
 
 ---
 
+## [v0.1.67] - 2026-11-19
+- **✨ 주요 기능 및 버그 수정**:
+  - **네이버 MYBOX 공유 폴더 및 다중 파일 다운로드 지원 (`downloader/resolvers/naver_mybox.py`, `downloader/resolvers/direct.py`, `downloader/engine.py`, `downloader/manager.py`)**:
+    - 네이버 MYBOX 공유 폴더(`resourceType == "folder"`, `mybox.naver.com/share/list?shareKey=...`) 링크 감지 시 `folder/list` API를 재귀적으로 호출하여 폴더 내 하위 파일 전체를 자동 수집하고 폴더명 서브폴더로 묶음 다운로드하도록 지원했습니다.
+    - 다운로드 API(`download.api`) 호출 시 필수적인 `NDV_SHARE` 세션 쿠키 및 파일별 `authToken`을 큐 작업과 다운로드 요청에 보존하여 `1206 Auth Fail` 다운로드 실패를 해결했습니다.
+    - `DirectResolver`가 큐 작업의 `cookies`, `headers`, `referer` 옵션을 유지하도록 개선했습니다.
+    - 다운로드 엔진에서 바이너리 파일 다운로드 시 수신되는 서버 `application/json` 오류 응답을 감지하여 비정상 파일이 생성되지 않도록 차단했습니다.
+  - **동일 다운로드 내 중복 링크/파일 자동 제외 (`downloader/manager.py`, `downloader/resolvers/webpage.py`, `downloader/url_helper.py`)**:
+    - 한 건의 다운로드 요청(단일 게시글/패키지)에서 파생된 하위 작업 전체에 `group_id`를 부여하고, 동일 그룹 내에서 이미 대기, 다운로드 중이거나 완료된 링크 및 대상 폴더 내 동일 파일명이 감지되면 큐 등록을 건너뛰거나 다운로드를 스킵하도록 구현했습니다.
+    - `WebPageResolver`에서 본문에 GitHub 릴리스 태그 페이지와 해당 태그에 속한 개별 다운로드 에셋 링크가 공존할 경우 릴리스 태그 페이지를 우선 유지하여 중복 큐잉을 원천 방지했습니다.
+
+---
+
 ## [v0.1.66] - 2026-11-17
 - **✨ 주요 기능 및 버그 수정**:
   - **네이버 카페 회원 전용 첨부파일 다운로드 및 브라우저 세션 직접 추출 지원 (`downloader/resolvers/naver_cafe.py`, `config.py`, `extension/popup.js`, `templates/index.html`, `static/js/app.js`)**:
