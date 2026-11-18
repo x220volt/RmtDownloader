@@ -270,6 +270,16 @@ def main():
             f"  - 확장 프로그램 : {ext_zip.name} ({ext_zip.stat().st_size / 1024:.1f} KB)"
         )
         print("=" * 65)
+
+        if "--release" in sys.argv:
+            from release import get_git_token, get_previous_tag, publish_github_release
+            token = get_git_token()
+            if not token:
+                print("[!] GitHub 인증 토큰을 찾을 수 없어 릴리즈 업로드를 건너뜁니다.", file=sys.stderr)
+            else:
+                prev_tag = get_previous_tag(version_tag)
+                publish_github_release(version_tag, prev_tag, token)
+
     except Exception as e:
         print(f"\n[ERROR] 빌드 중 오류 발생: {e}", file=sys.stderr)
         sys.exit(1)
