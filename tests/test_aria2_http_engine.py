@@ -98,6 +98,33 @@ class Aria2HttpEngineTests(unittest.TestCase):
 
     @patch("downloader.aria2_http_engine.get_aria2_path", return_value="aria2c")
     @patch("downloader.aria2_http_engine.subprocess.Popen")
+    def test_run_rejects_html_file(self, mock_popen, mock_get_path):
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter(["FILE: /downloads/index.html\n"])
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_popen.return_value = mock_proc
+
+        task = Aria2HttpDownloadTask(
+            url="https://ievy3.github.io/projects/dunamis15/",
+            dest_dir=self.temp_dir,
+            filename="index.html",
+        )
+
+        os.makedirs(task._work_dir, exist_ok=True)
+        with open(os.path.join(task._work_dir, "index.html"), "wb") as output:
+            output.write(b"<!DOCTYPE html><html><head><title>Test</title></head><body>Hello</body></html>")
+
+        res = task.run()
+
+        self.assertFalse(res["success"])
+        self.assertEqual(res["status"], "failed")
+        self.assertIn("웹페이지(HTML)", res["error"])
+        # Dest dir should not contain index.html
+        self.assertFalse(os.path.exists(os.path.join(self.temp_dir, "index.html")))
+
+    @patch("downloader.aria2_http_engine.get_aria2_path", return_value="aria2c")
+    @patch("downloader.aria2_http_engine.subprocess.Popen")
     def test_run_failure(self, mock_popen, mock_get_path):
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["Error occurred\n"])

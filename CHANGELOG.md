@@ -4,6 +4,17 @@
 
 ---
 
+## [v0.1.68] - 2026-11-19
+- **✨ 주요 기능 및 버그 수정**:
+  - **GitHub Pages 및 일반 웹페이지 프로젝트 URL의 실제 릴리즈 파일 자동 추출 지원 (`downloader/resolvers/webpage.py`)**:
+    - `github.io`, `gitlab.io`, `notion.site`, `gitbook.io`, `wordpress.com`, `wixsite.com`을 커뮤니티 호스트에 추가하고, `/projects/`, `/patches/`, `/releases/` 등의 경로 및 확장자가 없는 웹페이지 URL을 `WebPageResolver`가 자동 감지하도록 개선했습니다.
+    - 웹페이지 본문에 연결된 GitHub 릴리즈 에셋(`.xdelta`, `.zip`, `.txt` 등)을 파싱하여 실제 배포 파일들을 추출하고 서브폴더로 일괄 다운로드하도록 지원했습니다.
+  - **aria2c 엔진의 HTML 웹페이지 수신 방어 및 자동 폴백 연동 (`downloader/aria2_http_engine.py`, `downloader/manager.py`)**:
+    - `aria2_http_enabled` 활성화 환경에서 다운로드 완료된 결과물이 HTML 웹페이지(`.html`, `.htm` 또는 `<!doctype html`, `<html` 헤더)인 경우 파일을 삭제하고 실패 처리하도록 방어 검증을 추가했습니다.
+    - 다운로드 관리자(`manager.py`)에서 aria2 엔진이 HTML 웹페이지를 감지했을 때 불필요한 표준 엔진 재시도를 건너뛰고 즉시 `_try_webpage_fallback`으로 넘어가 웹페이지 내 실제 배포 링크를 자동 탐색하여 재큐잉하도록 개선했습니다.
+
+---
+
 ## [v0.1.67] - 2026-11-19
 - **✨ 주요 기능 및 버그 수정**:
   - **네이버 MYBOX 공유 폴더 및 다중 파일 다운로드 지원 (`downloader/resolvers/naver_mybox.py`, `downloader/resolvers/direct.py`, `downloader/engine.py`, `downloader/manager.py`)**:

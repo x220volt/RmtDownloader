@@ -332,6 +332,40 @@ class Aria2HttpDownloadTask:
                     "status": "failed",
                     "error": "aria2c completed without the expected output file",
                 }
+
+            # HTML 응답 감지 (직접 다운로드 링크가 아닌 일반 웹페이지나 안내 페이지인 경우)
+            is_html = False
+            lower_name = (self.filename or "").lower()
+            if lower_name.endswith((".html", ".htm")):
+                is_html = True
+            else:
+                try:
+                    with open(final_path, "rb") as f:
+                        chunk = f.read(2048).lstrip().lower()
+                    if chunk.startswith((b"<!doctype html", b"<html")):
+                        is_html = True
+                    elif b"<html" in chunk and (
+                        b"<head" in chunk
+                        or b"<body" in chunk
+                        or b"challenges.cloudflare.com" in chunk
+                    ):
+                        is_html = True
+                except OSError:
+                    pass
+
+            if is_html:
+                logger.warning(
+                    f"[Aria2HTTP] 다운로드 결과물이 웹페이지(HTML)로 감지되어 삭제합니다: {self.filename}"
+                )
+                try:
+                    self.cleanup_partial(self.dest_dir, self._work_id)
+                except OSError as err:
+                    logger.warning("aria2 cleanup failed for html download: %s", err)
+                return {
+                    "success": False,
+                    "status": "failed",
+                    "error": "다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.",
+                }
             with _FINALIZE_LOCK:
                 self.filename = get_unique_filename(self.dest_dir, self.filename)
                 target = os.path.join(self.dest_dir, self.filename)

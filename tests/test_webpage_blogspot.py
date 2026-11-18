@@ -20,6 +20,13 @@ class TestWebPageAndHtmlDownloadRejection(unittest.TestCase):
         resolver = default_dispatcher.get_resolver(url)
         self.assertIsInstance(resolver, WebPageResolver)
 
+    def test_githubio_project_routed_to_webpage_resolver(self):
+        url = "https://ievy3.github.io/projects/dunamis15/"
+        self.assertTrue(self.wp_resolver.can_handle(url))
+
+        resolver = default_dispatcher.get_resolver(url)
+        self.assertIsInstance(resolver, WebPageResolver)
+
     def test_general_html_url_routed_to_webpage_resolver(self):
         # 일반 웹페이지 .html URL도 DirectResolver가 아닌 WebPageResolver로 라우팅됨
         url = "https://example.com/games/retro/patch-v1.html"

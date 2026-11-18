@@ -1873,10 +1873,12 @@ class DownloadManager:
                     raise ValueError("Download task returned an invalid result")
 
                 # aria2c 고속 분할 다운로드 실패 시 표준 DownloadTask로 자동 전환 (Fallback)
+                is_html_error = "웹페이지(HTML)" in (result.get("error") or "")
                 if (
                     use_aria2
                     and policy is not None
                     and result.get("status") == "failed"
+                    and not is_html_error
                     and not getattr(task, "_is_stopped", False)
                 ):
                     logger.warning(

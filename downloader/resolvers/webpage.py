@@ -56,11 +56,17 @@ COMMUNITY_HOSTS = (
     "velog.io",
     "brunch.co.kr",
     "medium.com",
+    "github.io",
+    "gitlab.io",
+    "notion.site",
+    "gitbook.io",
+    "wordpress.com",
+    "wixsite.com",
 )
 
 # 일반 웹사이트에서 게시글/문서 뷰어로 판단할 경로 패턴
 ARTICLE_PATH_REGEX = re.compile(
-    r"/(?:board/view|mgallery/board/view|mini/board/view|bbs/board\.php|article|articles|post|posts|entry|threads|topic|\d{4}/\d{2})(?:/|$|\?)",
+    r"/(?:board/view|mgallery/board/view|mini/board/view|bbs/board\.php|article|articles|post|posts|entry|threads|topic|project|projects|patch|patches|release|releases|download|downloads|game|games|view|\d{4}/\d{2})(?:/|$|\?)",
     re.I,
 )
 
@@ -398,6 +404,13 @@ class WebPageResolver(BaseResolver):
 
         if ARTICLE_PATH_REGEX.search(parsed.path or ""):
             return True
+
+        # 경로 끝이 디렉터리(/)이거나 확장자가 없는 일반 웹 페이지 경로인 경우
+        if not _is_image_url_or_name(url):
+            clean_path = path_lower.rstrip("/")
+            leaf = clean_path.split("/")[-1] if clean_path else ""
+            if path_lower.endswith("/") or (leaf and "." not in leaf):
+                return True
 
         return False
 
