@@ -179,4 +179,4 @@ $env:RUN_LIVE_TESTS = '1'
 Remove-Item Env:RUN_LIVE_TESTS
 ```
 
-코드 리뷰 및 리팩토링 상세 내역은 [REVIEW.md](file:///c:/_coding/remote_downloader/REVIEW.md), 전체 버전별 세부 변경 기록은 [CHANGELOG.md](file:///c:/_coding/remote_downloader/CHANGELOG.md)를 참고하세요.
+전체 버전별 세부 변경 기록은 [CHANGELOG.md](file:///c:/_coding/remote_downloader/CHANGELOG.md)를 참고하세요.

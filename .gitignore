@@ -27,6 +27,10 @@ kone_watcher_state.json
 data/
 scratch*
 
+# Technical review & analysis documents
+*_REVIEW.md
+REVIEW.md
+
 # OS artifacts
 Thumbs.db
 .DS_Store
