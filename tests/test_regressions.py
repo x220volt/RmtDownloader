@@ -434,6 +434,10 @@ class ResolverLifecycleTests(unittest.TestCase):
         self.assertIn("key=testkey123", resolved["url"])
         self.assertEqual(len(resolved["files"]), 2)
         self.assertEqual(resolved["files"][1]["name"], "B.zip")
+        self.assertIn("api/download/fileA", resolved["files"][0]["url"])
+        self.assertIn("key=testkey123", resolved["files"][0]["url"])
+        self.assertIn("api/download/fileB", resolved["files"][1]["url"])
+        self.assertIn("key=testkey123", resolved["files"][1]["url"])
         self.assertEqual(resolved["subfolder"], "xshare_bundle123")
 
     def test_xshare_resolver_single(self):
@@ -1157,6 +1161,17 @@ class ResolverLifecycleTests(unittest.TestCase):
                 assert saved_path is not None
                 self.assertTrue(os.path.exists(saved_path))
                 self.assertIn("[페이지캡처]", os.path.basename(saved_path))
+
+                # latin1 mojibake 복원 검증
+                mojibake_hint = "어메이징 스파이더맨2".encode("utf-8").decode("latin1")
+                saved_mojibake_path = capture_full_page_screenshot(
+                    "https://gall.dcinside.com/mgallery/board/view/?id=retrogame&no=243625",
+                    tmp_dir,
+                    title_hint=mojibake_hint,
+                )
+                self.assertIsNotNone(saved_mojibake_path)
+                assert saved_mojibake_path is not None
+                self.assertIn("어메이징 스파이더맨2", os.path.basename(saved_mojibake_path))
 
             from downloader.manager import DownloadJob, DownloadManager, save_url_shortcut_file
 

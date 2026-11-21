@@ -760,6 +760,19 @@ class WebPageResolver(BaseResolver):
                                 extra_opts=sub_opts,
                             )
 
+        # 1-1. 특정 사이트에서 본문 외곽(사이드바/aside 등)에 다운로드 링크가 위치하여 컨테이너 스캔에서 누락된 경우 body 전체 보완 스캔
+        if not cloud_candidates and not direct_file_candidates and soup.body and soup.body not in containers:
+            for a in soup.body.find_all("a", href=True):
+                raw_href = str(a.get("href") or "").strip()
+                if not raw_href or raw_href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    continue
+                full_href = urljoin(page_url, raw_href)
+                if _is_cloud_service_url(full_href):
+                    _add_candidate(cloud_candidates, full_href)
+                elif a.has_attr("download") or _has_downloadable_extension(full_href):
+                    if not _is_image_url_or_name(full_href):
+                        _add_candidate(direct_file_candidates, full_href)
+
         # 2. 디시인사이드 첨부파일 박스 (.appending_file li a) 확인
         for a in soup.select(".appending_file li a[href]"):
             href = urljoin(page_url, str(a.get("href") or "").strip())
@@ -904,9 +917,16 @@ class WebPageResolver(BaseResolver):
                 ):
                     resolved["headers"]["Referer"] = page_url
 
-                resolved.setdefault("source_page_url", page_url)
-                resolved.setdefault("article_title", post_title)
-                resolved.setdefault("subfolder", post_title)
+                resolved["source_page_url"] = page_url
+                if post_title and post_title != "Web_Post":
+                    resolved["article_title"] = post_title
+                    if options and options.get("subfolder"):
+                        resolved["subfolder"] = options["subfolder"]
+                    else:
+                        resolved["subfolder"] = post_title
+                else:
+                    resolved.setdefault("article_title", post_title)
+                    resolved.setdefault("subfolder", post_title)
 
                 # 게시글 내 추가 다운로드 링크가 더 있다면 extra_jobs로 함께 큐에 등록 (중복 제거)
                 remaining = all_candidates[idx + 1 :]
@@ -929,11 +949,18 @@ class WebPageResolver(BaseResolver):
                         if rem_key in seen_urls_in_post:
                             continue
                         seen_urls_in_post.add(rem_key)
+                        rem_options = dict(rem.get("options") or {})
+                        rem_options["source_page_url"] = page_url
+                        if post_title and post_title != "Web_Post":
+                            rem_options.setdefault("article_title", post_title)
+                            rem_options.setdefault(
+                                "subfolder", resolved.get("subfolder") or post_title
+                            )
                         extra_jobs.append(
                             {
                                 "url": rem_u,
                                 "filename": rem.get("name", ""),
-                                "options": rem.get("options") or {},
+                                "options": rem_options,
                             }
                         )
                     resolved["extra_jobs"] = extra_jobs

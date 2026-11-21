@@ -4,6 +4,23 @@
 
 ---
 
+## [v0.1.69] - 2026-11-21
+- **✨ 주요 기능 및 버그 수정**:
+  - **네이버 카페 모바일 웹/앱 공유 링크 지원 및 파싱 강화 (`downloader/resolvers/naver_cafe.py`, `downloader/addons/services/naver_cafe.py`)**:
+    - 모바일 웹/앱 '공유하기' 링크(`/ca-fe/web/cafes/{cafe_name}/articles/{article_id}`) 및 `/{cafe_name}/articles/{article_id}` 형식을 정식 지원하도록 개선했습니다.
+    - 공유 URL의 `art` JWT 토큰에서 `cafeId`(고유 숫자 club_id)와 `articleId`를 자동 추출하여 별도 네트워크 오버헤드 없이 신속하게 API 조회가 이루어지도록 최적화했습니다.
+    - `iframe_url`, `iframe_url_utf8`이 포함된 PC 프레임 링크 파싱 및 게시글 제목의 HTML 엔티티, 한글 모지바케 방어 정제 로직을 보강했습니다.
+  - **MediaFire 및 웹페이지 한글 파일명/스크린샷 캡처 깨짐(모지바케) 자동 복원 (`downloader/engine.py`, `downloader/resolvers/mediafire.py`, `downloader/resolvers/webpage.py`, `downloader/browser_solver.py`, `downloader/manager.py`)**:
+    - MediaFire 등 일부 CDN 서버가 `Content-Disposition` 헤더에 Latin-1(ISO-8859-1)로 응답하여 발생하는 UTF-8 한글 깨짐을 `fix_mojibake()`로 원본 한글로 자동 복원합니다.
+    - `WebPageResolver`에서 외부 클라우드 링크를 거치더라도 원본 블로그/커뮤니티 게시글 제목을 최우선으로 `article_title`과 `subfolder`에 유지하고, `source_page_url`을 고정하도록 수정했습니다.
+    - 전체 페이지 스크린샷 캡처 및 바로가기 파일 생성 시 한글 타이틀이 깨지지 않도록 복원 처리를 추가했습니다.
+  - **x-share.net 다중 파일 묶음(/b/) 다운로드 지원 및 번들 처리 개선 (`downloader/resolvers/xshare.py`)**:
+    - x-share.net 폴더 및 묶음 링크 처리 시 내부 파일 목록을 안정적으로 순회 분석하여 일괄 큐잉되도록 개선했습니다.
+  - **웹페이지 내 클라우드 다운로드 링크 자동 탐색 및 라우팅 강화 (`downloader/resolvers/webpage.py`, `downloader/resolvers/gdrive.py`)**:
+    - 커뮤니티 게시글 본문 내 첨부파일 및 구글 드라이브 링크 추출과 다운로드 연동을 안정화했습니다.
+
+---
+
 ## [v0.1.68] - 2026-11-19
 - **✨ 주요 기능 및 버그 수정**:
   - **GitHub Pages 및 일반 웹페이지 프로젝트 URL의 실제 릴리즈 파일 자동 추출 지원 (`downloader/resolvers/webpage.py`)**:

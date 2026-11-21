@@ -502,6 +502,16 @@ class GitHubResolver(BaseResolver):
             )
 
         if file_items:
+            # 단순 텍스트/해시/체크섬 파일이 첫 번째로 지정되어 주 다운로드 대상을 가리지 않도록 후순위로 배치
+            low_exts = (
+                ".txt", ".md", ".sha256", ".sha1", ".md5", ".sums",
+                ".json", ".xml", ".yml", ".yaml"
+            )
+            def _is_low_priority(item: dict[str, Any]) -> int:
+                name = str(item.get("name") or "").lower()
+                return 1 if (name.endswith(low_exts) or "sha256" in name or "checksum" in name) else 0
+
+            file_items.sort(key=_is_low_priority)
             first = file_items[0]
             result: dict[str, Any] = {
                 "url": first["url"],

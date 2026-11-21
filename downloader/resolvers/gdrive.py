@@ -173,6 +173,16 @@ class GoogleDriveResolver(BaseResolver):
                         raise PermissionError(
                             "Google Drive 파일 접근 권한이 필요합니다. 공유 설정을 확인하세요."
                         )
+                    if (
+                        "infected with a virus" in text.lower()
+                        or "infected file" in text.lower()
+                        or "감염된 파일" in text
+                    ):
+                        raise PermissionError(
+                            "Google Drive 파일 다운로드 불가: 구글 바이러스 검사에서 악성 파일로 감지되어 공유 다운로드가 차단되었습니다 "
+                            "('Sorry, this file is infected with a virus. Only the owner is allowed to download infected files.'). "
+                            "구글 보안 정책상 파일 소유자(업로더) 계정으로만 다운로드가 허용되는 파일입니다."
+                        )
 
                     soup = BeautifulSoup(text, "html.parser")
 
@@ -225,6 +235,17 @@ class GoogleDriveResolver(BaseResolver):
                                 )
                                 logger.info(
                                     f"[GoogleDriveResolver] 정규식 다운로드 링크 파싱 완료: {final_url}"
+                                )
+                            else:
+                                err_caption = soup.select_one(".uc-error-caption, .uc-warning-caption")
+                                err_sub = soup.select_one(".uc-error-subcaption")
+                                if err_caption:
+                                    detail = err_caption.get_text(strip=True)
+                                    if err_sub:
+                                        detail += f" ({err_sub.get_text(strip=True)})"
+                                    raise PermissionError(f"Google Drive 파일 다운로드 거부: {detail}")
+                                raise RuntimeError(
+                                    f"Google Drive 직링크 추출 실패: 파일 대신 안내 웹페이지가 수신되었습니다 ({soup.title.string.strip() if soup.title else 'HTML'})."
                                 )
 
                 if not filename and options and options.get("filename"):

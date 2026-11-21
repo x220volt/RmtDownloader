@@ -20,6 +20,7 @@ from config import CONFIG_DIR
 
 from .engine import (
     DownloadTask,
+    fix_mojibake,
     format_bytes,
     format_eta,
     format_speed,
@@ -57,9 +58,10 @@ def save_url_shortcut_file(
     if not clean_target.lower().startswith(("http://", "https://", "magnet:")):
         return None
 
+    clean_hint = fix_mojibake(title_hint or "")
     os.makedirs(dest_dir, exist_ok=True)
     safe_base = re.sub(
-        r'[\\/*?:"<>|\r\n\t]+', "_", (title_hint or "download")
+        r'[\\/*?:"<>|\r\n\t]+', "_", (clean_hint or "download")
     ).strip(" ._")
     if len(safe_base) > 90:
         safe_base = safe_base[:90].rstrip(" ._")
@@ -703,8 +705,6 @@ class DownloadManager:
                         job_urls.append(job.original_url)
                     if job.resolved_url:
                         job_urls.append(job.resolved_url)
-                    for extra_u in job.options.get("_registered_urls", []):
-                        job_urls.append(extra_u)
 
                     for u in job_urls:
                         if not u:
@@ -1271,14 +1271,16 @@ class DownloadManager:
                 or job.original_url
                 or ""
             ).strip()
-            capture_title = str(
-                resolved.get("article_title")
-                or resolved.get("subfolder")
-                or target_subfolder
-                or os.path.splitext(
-                    resolved.get("filename") or job.filename or "page"
-                )[0]
-            ).strip()
+            capture_title = fix_mojibake(
+                str(
+                    resolved.get("article_title")
+                    or resolved.get("subfolder")
+                    or target_subfolder
+                    or os.path.splitext(
+                        resolved.get("filename") or job.filename or "page"
+                    )[0]
+                ).strip()
+            )
             if capture_target_url.lower().startswith(("http://", "https://")):
                 from .browser_solver import capture_full_page_screenshot
 
@@ -1308,15 +1310,17 @@ class DownloadManager:
                 if src_page.lower().startswith(("http://", "https://"))
                 else dl_link
             )
-            shortcut_title = str(
-                resolved.get("article_title")
-                or job.source_title
-                or resolved.get("subfolder")
-                or target_subfolder
-                or os.path.splitext(
-                    resolved.get("filename") or job.filename or "download"
-                )[0]
-            ).strip()
+            shortcut_title = fix_mojibake(
+                str(
+                    resolved.get("article_title")
+                    or job.source_title
+                    or resolved.get("subfolder")
+                    or target_subfolder
+                    or os.path.splitext(
+                        resolved.get("filename") or job.filename or "download"
+                    )[0]
+                ).strip()
+            )
             if shortcut_url.lower().startswith(("http://", "https://", "magnet:")):
                 save_url_shortcut_file(
                     shortcut_url,
@@ -1336,12 +1340,6 @@ class DownloadManager:
         """해석 결과에 포함된 다중 첨부파일(`files`) 및 후속 작업(`extra_jobs`)을 큐에 등록합니다."""
         group_id = job.options.get("group_id") or job.id
         job.options["group_id"] = group_id
-
-        # 현재 작업의 URL 및 파일명 등록
-        if job.original_url:
-            job.options.setdefault("_registered_urls", []).append(job.original_url)
-        if job.resolved_url:
-            job.options.setdefault("_registered_urls", []).append(job.resolved_url)
 
         extra_files = resolved.get("files", [])
         if len(extra_files) > 1:
@@ -1396,8 +1394,6 @@ class DownloadManager:
                     "referer": extra_opts.get("referer"),
                     "source_service": resolved.get("source_service", "Direct"),
                 }
-                new_job.options.setdefault("_registered_urls", []).append(extra["url"])
-                job.options.setdefault("_registered_urls", []).append(extra["url"])
 
                 with self._lock:
                     if (
@@ -1434,8 +1430,6 @@ class DownloadManager:
                 extra_opts["group_id"] = group_id
                 new_job = DownloadJob(extra_url, job.download_dir, extra_opts)
                 new_job.filename = extra_name
-                new_job.options.setdefault("_registered_urls", []).append(extra_url)
-                job.options.setdefault("_registered_urls", []).append(extra_url)
                 self.jobs[new_job.id] = new_job
                 self._broadcast("job_added", new_job.to_dict())
                 self.queue.put(new_job.id)
@@ -1714,9 +1708,26 @@ class DownloadManager:
                 # 동일 다운로드 그룹(group_id) 내 중복 파일/직링크 검사 및 필터링
                 if resolved.get("files"):
                     unique_files = []
+                    seen_urls = set()
+                    seen_names = set()
+                    from .url_helper import clean_url, canonical_url_key
+
+                    original_first_file = resolved["files"][0] if resolved["files"] else None
+
                     for f in resolved["files"]:
                         f_url = f.get("url", "")
                         f_name = f.get("name", "")
+                        clean_u = clean_url(f_url) if f_url else ""
+                        canon_u = canonical_url_key(f_url) if f_url else ""
+                        clean_n = sanitize_filename(f_name).strip().lower() if f_name else ""
+
+                        if clean_u and clean_u in seen_urls:
+                            continue
+                        if canon_u and canon_u in seen_urls:
+                            continue
+                        if clean_n and clean_n in seen_names:
+                            continue
+
                         if self._is_duplicate_in_group(
                             group_id,
                             f_url,
@@ -1730,6 +1741,13 @@ class DownloadManager:
                                 f_url,
                             )
                             continue
+
+                        if clean_u:
+                            seen_urls.add(clean_u)
+                        if canon_u:
+                            seen_urls.add(canon_u)
+                        if clean_n:
+                            seen_names.add(clean_n)
                         unique_files.append(f)
 
                     if not unique_files:
@@ -1752,10 +1770,17 @@ class DownloadManager:
                         continue
 
                     resolved["files"] = unique_files
-                    if resolved["files"][0]["url"] != resolved.get("url"):
-                        resolved["url"] = resolved["files"][0]["url"]
-                        resolved["filename"] = resolved["files"][0].get("name", "")
-                        resolved["file_size"] = resolved["files"][0].get("size")
+                    if (
+                        unique_files
+                        and original_first_file
+                        and unique_files[0] != original_first_file
+                    ):
+                        resolved["url"] = unique_files[0]["url"]
+                        resolved["filename"] = (
+                            unique_files[0].get("name", "")
+                            or unique_files[0].get("filename", "")
+                        )
+                        resolved["file_size"] = unique_files[0].get("size")
                 else:
                     r_url = resolved.get("url") or job.original_url
                     r_name = resolved.get("filename") or job.filename
@@ -1798,7 +1823,6 @@ class DownloadManager:
                     job.resolved_url = resolved["url"]
                     if resolved.get("filename"):
                         job.filename = resolved["filename"]
-                    job.options.setdefault("_registered_urls", []).append(resolved["url"])
                     resolved_source_title = str(
                         resolved.get("article_title") or ""
                     ).strip()

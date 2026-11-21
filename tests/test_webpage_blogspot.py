@@ -79,6 +79,36 @@ class TestWebPageAndHtmlDownloadRejection(unittest.TestCase):
         self.assertIn("drive.google.com", target_url)
         self.assertIn("1pGVDFmQ_-qY7A5BFahanUb524cFsUIk3", target_url)
 
+    def test_resolve_from_html_preserves_post_title_and_page_url(self):
+        mock_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>[XBOX360] 어메이징 스파이더 맨 2 한글패치 배포 : 네이버 블로그</title>
+            <meta property="og:title" content="[XBOX360] 어메이징 스파이더 맨 2 한글패치 배포">
+        </head>
+        <body>
+            <div class="se-main-container">
+                <a href="https://www.mediafire.com/file/3mq9ze7ivi6lw1h/file.zip">MediaFire 다운로드</a>
+            </div>
+        </body>
+        </html>
+        """
+        page_url = "https://blog.naver.com/jsyhmju/224446546866"
+        with unittest.mock.patch("downloader.resolvers.mediafire.MediaFireResolver.resolve") as mock_mf_resolve:
+            mock_mf_resolve.return_value = {
+                "url": "https://download1593.mediafire.com/token/file.zip",
+                "filename": "어메이징_스파이더맨2_한국어_패쳐_1.0.zip",
+                "source_service": "MediaFire",
+                "article_title": "어메이징_스파이더맨2_한국어_패쳐_1.0",
+                "subfolder": "어메이징_스파이더맨2_한국어_패쳐_1.0",
+            }
+            resolved = self.wp_resolver.resolve_from_html(mock_html, page_url)
+            self.assertEqual(resolved["article_title"], "[XBOX360] 어메이징 스파이더 맨 2 한글패치 배포")
+            self.assertEqual(resolved["subfolder"], "[XBOX360] 어메이징 스파이더 맨 2 한글패치 배포")
+            self.assertEqual(resolved["source_page_url"], page_url)
+            self.assertEqual(resolved["filename"], "어메이징_스파이더맨2_한국어_패쳐_1.0.zip")
+
 
 if __name__ == "__main__":
     unittest.main()

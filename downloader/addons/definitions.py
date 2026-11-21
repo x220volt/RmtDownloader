@@ -30,6 +30,7 @@ from .services.rootz import RootzAddon
 from .services.naver_mybox import NaverMyBoxAddon
 from .services.naver_cafe import NaverCafeAddon
 from .services.tistory import TistoryAddon
+from .services.selica import SelicaAddon
 from .services.webpage import WebPageAddon
 from .services.direct import DirectAddon
 
@@ -54,6 +55,7 @@ __all__ = [
     "RomsfunAddon",
     "RomspureAddon",
     "RootzAddon",
+    "SelicaAddon",
     "TeraBoxAddon",
     "TistoryAddon",
     "TorrentAddon",
@@ -77,6 +79,7 @@ def register_default_addons(registry) -> None:
         NaverMyBoxAddon(),
         NaverCafeAddon(),
         TistoryAddon(),
+        SelicaAddon(),
         TeraBoxAddon(),
         GigaFileAddon(),
         TransferitAddon(),

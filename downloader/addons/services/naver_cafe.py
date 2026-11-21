@@ -9,7 +9,7 @@ class NaverCafeAddon(HostingAddon):
     name = "Naver Cafe"
     category = "portal"
     category_name = "국내 포털 & 블로그"
-    domains = ["cafe.naver.com"]
+    domains = ["cafe.naver.com", "m.cafe.naver.com", "downapi.cafe.naver.com"]
     badge_class = "badge-naver"
     badge_label = "Naver Cafe (네이버 카페 첨부파일)"
     badge_style = {

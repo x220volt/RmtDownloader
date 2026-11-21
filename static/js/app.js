@@ -801,6 +801,7 @@ function getServiceTagClass(service) {
   if (lower.includes('pixeldrain')) return 'badge-pixeldrain';
   if (lower.includes('rootz')) return 'badge-rootz';
   if (lower.includes('github')) return 'badge-github';
+  if (lower.includes('selica')) return 'badge-selica';
   if (lower.includes('gdrive') || lower.includes('google drive') || lower.includes('google')) return 'badge-gdrive';
   return 'badge-direct';
 }

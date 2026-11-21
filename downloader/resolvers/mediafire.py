@@ -9,7 +9,12 @@ import requests
 from bs4 import BeautifulSoup
 
 from ..browser_solver import stealth_browser_session
-from ..engine import extract_filename_from_headers, sanitize_filename, sanitize_folder_name
+from ..engine import (
+    extract_filename_from_headers,
+    fix_mojibake,
+    sanitize_filename,
+    sanitize_folder_name,
+)
 from .base import BaseResolver
 
 logger = logging.getLogger(__name__)
@@ -194,7 +199,8 @@ class MediaFireResolver(BaseResolver):
 
         clean_title = ""
         if extracted_filename:
-            clean_title = re.sub(r"\.[a-zA-Z0-9]+$", "", extracted_filename).strip()
+            extracted_filename = fix_mojibake(extracted_filename)
+            clean_title = fix_mojibake(re.sub(r"\.[a-zA-Z0-9]+$", "", extracted_filename).strip())
 
         logger.info(f"[MediaFire] 직링크 발급 성공: {extracted_filename} -> {download_url[:60]}...")
 

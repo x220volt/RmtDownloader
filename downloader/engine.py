@@ -109,7 +109,7 @@ def extract_filename_from_headers(
             star_match = re.search(r"filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)", cd)
             if star_match:
                 try:
-                    return unquote(star_match.group(1).strip().strip("\"'"))
+                    return fix_mojibake(unquote(star_match.group(1).strip().strip("\"'")))
                 except Exception:
                     pass
 
@@ -121,16 +121,16 @@ def extract_filename_from_headers(
                 raw = name_match.group(1) or name_match.group(2)
                 if raw:
                     try:
-                        return unquote(raw.strip().strip("\"'"))
+                        return fix_mojibake(unquote(raw.strip().strip("\"'")))
                     except Exception:
-                        return raw.strip().strip("\"'")
+                        return fix_mojibake(raw.strip().strip("\"'"))
 
     if fallback_url:
         parsed = urlparse(fallback_url)
         path = unquote(parsed.path or "")
         base = os.path.basename(path)
         if base and "." in base:
-            return base
+            return fix_mojibake(base)
 
     return ""
 

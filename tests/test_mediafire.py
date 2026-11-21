@@ -100,6 +100,41 @@ class MediaFireResolverTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.resolver.resolve("https://www.mediafire.com/file/deleted123/file")
 
+    @patch("downloader.resolvers.mediafire.requests.Session")
+    def test_resolve_latin1_mojibake_header(self, mock_session_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        latin_name = "어메이징_스파이더맨2_한국어_패쳐_1.0.zip".encode("utf-8").decode("latin1")
+
+        page_html = f"""
+        <html>
+        <body>
+        <div class="filename">{latin_name}</div>
+        <a id="downloadButton" href="https://download1593.mediafire.com/token/file.zip">Download</a>
+        </body>
+        </html>
+        """
+        page_resp = MagicMock()
+        page_resp.status_code = 200
+        page_resp.text = page_html
+
+        # latin-1 decoded UTF-8 filename in Content-Disposition
+        mojibake_header = f'attachment; filename="{latin_name}"'
+        head_resp = MagicMock()
+        head_resp.status_code = 200
+        head_resp.headers = {
+            "Content-Disposition": mojibake_header,
+            "Content-Length": "1000",
+        }
+
+        mock_session.get.return_value = page_resp
+        mock_session.head.return_value = head_resp
+
+        result = self.resolver.resolve("https://www.mediafire.com/file/3mq9ze7ivi6lw1h/file.zip")
+        self.assertEqual(result["filename"], "어메이징_스파이더맨2_한국어_패쳐_1.0.zip")
+        self.assertEqual(result["article_title"], "어메이징_스파이더맨2_한국어_패쳐_1.0")
+
     def test_addon_registration(self):
         addon = addon_registry.find_for_url("https://www.mediafire.com/file/fytn4diqt1d7tuq/sample.pkg/file")
         assert addon is not None

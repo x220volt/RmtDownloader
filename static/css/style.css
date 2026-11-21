@@ -429,6 +429,12 @@ body {
   border: 1px solid rgba(255, 86, 56, 0.3);
 }
 
+.badge-selica {
+  background: rgba(99, 102, 241, 0.18);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
 .badge-terabox {
   background: rgba(14, 165, 233, 0.15);
   color: #38bdf8;

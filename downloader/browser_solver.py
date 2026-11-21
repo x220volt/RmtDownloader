@@ -98,9 +98,12 @@ def capture_full_page_screenshot(
     if not url or not url.lower().startswith(("http://", "https://")):
         return None
 
+    from .engine import fix_mojibake
+
+    clean_hint = fix_mojibake(title_hint or "")
     os.makedirs(dest_dir, exist_ok=True)
     safe_base = re.sub(
-        r'[\\/*?:"<>|\r\n\t]+', "_", (title_hint or "page_capture")
+        r'[\\/*?:"<>|\r\n\t]+', "_", (clean_hint or "page_capture")
     ).strip(" ._")
     if len(safe_base) > 90:
         safe_base = safe_base[:90].rstrip(" ._")
@@ -159,7 +162,9 @@ def capture_full_page_screenshot(
 
             # 제목 힌트가 비어 있었다면 실제 브라우저 타이틀 활용
             if not title_hint and page.title:
-                clean_t = re.sub(r'[\\/*?:"<>|\r\n\t]+', "_", page.title).strip(" ._")
+                clean_t = re.sub(
+                    r'[\\/*?:"<>|\r\n\t]+', "_", fix_mojibake(page.title)
+                ).strip(" ._")
                 if clean_t:
                     if len(clean_t) > 90:
                         clean_t = clean_t[:90].rstrip(" ._")

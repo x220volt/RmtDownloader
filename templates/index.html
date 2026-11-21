@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.68') }}">
+  <link rel="stylesheet" href="/static/css/style.css?v={{ app_version | default('v0.1.69') }}">
 </head>
 <body>
   <div class="app-container">
@@ -30,7 +30,7 @@
         </div>
         <div>
           <h1 class="logo-title">Remote Downloader</h1>
-          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.68') }}</p>
+          <p class="logo-subtitle">원격 파일 다운로드 센터 · {{ app_version | default('v0.1.69') }}</p>
         </div>
       </div>
 
@@ -432,7 +432,7 @@
               </p>
               <div class="settings-update-row">
                 <div class="settings-update-vers">
-                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.68') }}</strong>
+                  <span style="color: var(--text-muted);">현재 버전: </span><strong style="color: #fff;" id="modalCurrentAppVer">{{ app_version | default('v0.1.69') }}</strong>
                   <span style="margin: 0 8px; color: var(--border-color);">|</span>
                   <span style="color: var(--text-muted);">최신 버전: </span><strong style="color: #34d399;" id="modalLatestAppVer">-</strong>
                 </div>
@@ -580,8 +580,8 @@
               </div>
               <div class="form-group" style="margin-bottom: 0;">
                 <label class="form-label" for="settingNaverCafeCookie">네이버 카페 로그인 쿠키 (선택사항)</label>
-                <input type="text" id="settingNaverCafeCookie" class="form-input" placeholder="브라우저 개발자 도구에서 복사한 네이버 쿠키 (NID_AUT, NID_SES 등) 붙여넣기" autocomplete="off">
-                <span class="form-help">로그인이 필요한 멤버 전용 네이버 카페 게시글의 첨부파일 다운로드를 지원합니다. 크롬 확장 프로그램에서 현재 페이지를 스캔하거나 탭을 직접 전송하면 쿠키 없이도 브라우저 세션으로 바로 다운로드할 수 있습니다.</span>
+                <input type="text" id="settingNaverCafeCookie" class="form-input" placeholder="예: NID_AUT=...; NID_SES=... (개발자도구 Cookie 헤더 전체)" autocomplete="off">
+                <span class="form-help">로그인이 필요한 멤버 전용 네이버 카페 게시글의 첨부파일 다운로드를 지원합니다. 브라우저 F12(개발자 도구) ➔ Network 탭에서 <code>Cookie:</code> 헤더 전체(NID_AUT, NID_SES)를 복사해 붙여넣으세요. (크롬 확장 프로그램에서 현재 페이지를 스캔하거나 탭을 직접 전송하면 쿠키 입력 없이도 브라우저 로그인 세션으로 바로 다운로드할 수 있습니다.)</span>
               </div>
             </div>
           </div>
@@ -935,6 +935,7 @@
                   <span class="badge badge-mybox">Naver MYBOX (mybox.naver.com)</span>
                   <span class="badge badge-naver">Naver Cafe (네이버 카페 첨부파일)</span>
                   <span class="badge badge-tistory">Tistory (티스토리 첨부파일)</span>
+                  <span class="badge badge-selica" style="background: rgba(99, 102, 241, 0.18); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.35);">Selica</span>
                 </div>
               </div>
 
@@ -963,6 +964,6 @@
   <!-- 토스트 알림 컨테이너 -->
   <div class="toast-container" id="toastContainer"></div>
 
-  <script src="/static/js/app.js?v={{ app_version | default('v0.1.68') }}"></script>
+  <script src="/static/js/app.js?v={{ app_version | default('v0.1.69') }}"></script>
 </body>
 </html>

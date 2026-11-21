@@ -327,46 +327,49 @@ class XShareResolver(BaseResolver):
                 f"x-share.net 묶음({bundle_id})에서 {len(files)}개의 파일을 발견했습니다."
             )
 
-            # 첫 번째 파일의 다운로드 key 발급
-            first_file = files[0]
-            first_key = self._get_download_key(first_file["id"], url, options=options)
-            first_dl_url = (
-                f"https://x-share.net/api/download/{first_file['id']}?key={first_key}"
-            )
+            file_items = []
+            for f in files:
+                f_id = f.get("id")
+                f_name = f.get("name", "")
+                f_size = f.get("size", 0)
+                try:
+                    f_key = self._get_download_key(f_id, url, options=options)
+                    f_dl_url = f"https://x-share.net/api/download/{f_id}?key={f_key}"
+                except Exception as e:
+                    logger.warning(f"[X-Share] 묶음 파일 '{f_name}' 키 발급 실패: {e}")
+                    f_dl_url = f"https://x-share.net/s/{f_id}"
 
-            if len(files) == 1:
-                return {
-                    "url": first_dl_url,
-                    "filename": first_file.get("name", ""),
-                    "headers": {
-                        "User-Agent": DEFAULT_USER_AGENT,
-                        "Referer": url,
-                    },
-                    "source_service": "X-Share",
-                }
+                file_items.append(
+                    {
+                        "name": f_name,
+                        "filename": f_name,
+                        "url": f_dl_url,
+                        "size": f_size,
+                        "headers": {
+                            "User-Agent": DEFAULT_USER_AGENT,
+                            "Referer": url,
+                        },
+                        "referer": url,
+                    }
+                )
 
-            # 다중 파일: manager의 extra_files 큐 등록 지원
-            file_items = [
-                {
-                    "name": f.get("name", ""),
-                    "url": f"https://x-share.net/s/{f['id']}",
-                    "size": f.get("size", 0),
-                    "referer": url,
-                }
-                for f in files
-            ]
-
-            return {
-                "url": first_dl_url,
-                "filename": first_file.get("name", ""),
+            first_item = file_items[0]
+            bundle_folder = (options or {}).get("subfolder") or f"xshare_{bundle_id}"
+            res = {
+                "url": first_item["url"],
+                "filename": first_item["name"],
+                "size": first_item["size"],
                 "headers": {
                     "User-Agent": DEFAULT_USER_AGENT,
                     "Referer": url,
                 },
                 "source_service": "X-Share",
-                "files": file_items,
-                "subfolder": f"xshare_{bundle_id}",
+                "subfolder": bundle_folder,
+                "article_title": bundle_folder,
             }
+            if len(file_items) > 1:
+                res["files"] = file_items
+            return res
 
         # 2. 개별 파일 (/s/<fileId>)
         elif "/s/" in path:
@@ -400,6 +403,7 @@ class XShareResolver(BaseResolver):
             return {
                 "url": dl_url,
                 "filename": filename,
+                "size": file_data.get("size"),
                 "headers": {
                     "User-Agent": DEFAULT_USER_AGENT,
                     "Referer": url,
