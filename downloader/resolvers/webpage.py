@@ -228,6 +228,12 @@ TITLE_SUFFIX_REGEX = re.compile(
     re.I,
 )
 
+# 게시글 본문 설치 안내 등에 참고용으로 자주 링크되는 범용 보조 패처/에뮬레이터 유틸리티 도구 패턴
+UTILITY_TOOL_REGEX = re.compile(
+    r"(?:/xdelta(?:-gpl)?(?:/|$)|/DeltaPatcher(?:/|$)|/CheatDevice|/flips(?:/|$)|/Lunar-IPS(?:/|$)|/pcsx2(?:/|$)|/rpcs3(?:/|$)|/yuzu(?:/|$)|/ryujinx(?:/|$)|/citra(?:/|$)|/dolphin(?:/|$))",
+    re.I,
+)
+
 
 def _decode_response_html(resp: requests.Response) -> str:
     """Content-Type에 charset이 누락되어 ISO-8859-1로 오판된 응답도 UTF-8로 안전하게 디코딩합니다."""
@@ -885,8 +891,20 @@ class WebPageResolver(BaseResolver):
         )
 
         last_err = None
+        primary_candidate_failed = False
+        primary_err = None
+
         for idx, cand in enumerate(all_candidates):
             cand_url = cand["url"]
+            is_utility = bool(UTILITY_TOOL_REGEX.search(cand_url))
+
+            # 주 배포 파일(클라우드 드라이브 등)이 실패했을 때, 단순 가이드용 보조 패처/유틸리티 툴로 잘못 폴백되지 않도록 방어
+            if primary_candidate_failed and is_utility:
+                logger.info(
+                    f"[WebPageResolver] 주 배포 파일 해석 실패 후 보조 유틸리티 도구({cand_url})로의 잘못된 폴백 방지"
+                )
+                continue
+
             cand_opts = dict(cand.get("options") or {})
             if cand.get("name") and not cand_opts.get("filename"):
                 cand_opts["filename"] = cand["name"]
@@ -971,7 +989,12 @@ class WebPageResolver(BaseResolver):
                     f"[WebPageResolver] 후보 링크 해석 실패 ({cand_url}): {e}"
                 )
                 last_err = e
+                if not is_utility and primary_err is None:
+                    primary_candidate_failed = True
+                    primary_err = e
 
+        if primary_err:
+            raise primary_err
         if last_err:
             raise last_err
         raise FileNotFoundError(

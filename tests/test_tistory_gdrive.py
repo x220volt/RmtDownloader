@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from downloader.resolvers.gdrive import GoogleDriveResolver, extract_gdrive_id
+from downloader.resolvers.gdrive import (
+    GoogleDriveResolver,
+    extract_gdrive_folder_id,
+    extract_gdrive_id,
+)
 from downloader.resolvers.tistory import TistoryResolver
 
 
@@ -290,6 +294,87 @@ class TestTistoryGDriveResolution(unittest.TestCase):
         self.assertEqual(
             direct_res["filename"],
             "Sly Cooper and the Thievius Raccoonus.7z.001",
+        )
+
+    def test_gdrive_folder_id_extraction_and_can_handle(self):
+        urls = [
+            (
+                "https://drive.google.com/drive/folders/1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6",
+                "1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6",
+            ),
+            (
+                "https://drive.google.com/drive/u/0/folders/1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6?usp=sharing",
+                "1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6",
+            ),
+            (
+                "https://drive.google.com/folders/1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6",
+                "1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6",
+            ),
+        ]
+        for url, expected_id in urls:
+            self.assertEqual(extract_gdrive_folder_id(url), expected_id)
+            self.assertTrue(self.gdrive_resolver.can_handle(url))
+
+    @patch("downloader.resolvers.gdrive.requests.Session")
+    def test_gdrive_folder_resolution_multiple_files(self, mock_session_cls):
+        mock_folder_html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>[PS2] 블러디 로어 3 [Kor-patch ver 1.0] - Google Drive</title>
+</head>
+<body>
+    <script>
+    window['_DRIVE_ivd'] = '\\x5b\\x5b\\x5b\\x22file1_id_12345678901234567890\\x22,\\x5b\\x22folder_id_xyz\\x22\\x5d,\\x22BloodyRoar3_KR_1.0.7z\\x22,\\x22application\\/x-compressed\\x22,0,null,0,0,0,0,0,null,null,12460958\\x5d,\\x5b\\x22file2_id_12345678901234567890\\x22,\\x5b\\x22folder_id_xyz\\x22\\x5d,\\x22BloodyRoar3_manual.pdf\\x22,\\x22application\\/pdf\\x22,0,null,0,0,0,0,0,null,null,54321\\x5d\\x5d\\x5d';
+    </script>
+</body>
+</html>"""
+        def mock_get(url, *args, **kwargs):
+            resp = MagicMock()
+            resp.__enter__.return_value = resp
+            resp.__exit__.return_value = None
+            if "folders" in url:
+                resp.status_code = 200
+                resp.url = url
+                resp.text = mock_folder_html
+                resp.headers = {"Content-Type": "text/html"}
+            elif "file/d/" in url:
+                resp.status_code = 200
+                resp.url = url
+                resp.text = "<html><title>BloodyRoar3_KR_1.0.7z - Google Drive</title></html>"
+                resp.headers = {"Content-Type": "text/html"}
+            else:
+                resp.status_code = 200
+                resp.url = "https://drive.usercontent.google.com/download?id=file1_id&export=download"
+                resp.headers = {
+                    "Content-Type": "application/x-compressed",
+                    "Content-Length": "12460958",
+                    "Content-Disposition": 'attachment; filename="BloodyRoar3_KR_1.0.7z"',
+                }
+            return resp
+
+        mock_session = MagicMock()
+        mock_session.get.side_effect = mock_get
+        mock_session_cls.return_value.__enter__.return_value = mock_session
+
+        res = self.gdrive_resolver.resolve(
+            "https://drive.google.com/drive/folders/1ZgK-oXFNRswlQ7Om7YipCH2bKa981sJ6"
+        )
+
+        self.assertEqual(res["filename"], "BloodyRoar3_KR_1.0.7z")
+        self.assertEqual(
+            res["subfolder"], "[PS2] 블러디 로어 3 [Kor-patch ver 1.0]"
+        )
+        self.assertEqual(
+            res["article_title"], "[PS2] 블러디 로어 3 [Kor-patch ver 1.0]"
+        )
+        self.assertIn("extra_jobs", res)
+        self.assertEqual(len(res["extra_jobs"]), 1)
+        extra = res["extra_jobs"][0]
+        self.assertIn("file2_id_12345678901234567890", extra["url"])
+        self.assertEqual(extra["filename"], "BloodyRoar3_manual.pdf")
+        self.assertEqual(
+            extra["options"]["subfolder"],
+            "[PS2] 블러디 로어 3 [Kor-patch ver 1.0]",
         )
 
 

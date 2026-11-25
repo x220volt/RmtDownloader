@@ -50,6 +50,7 @@ class MegaAddon(HostingAddon):
             file_id=opts.get("mega_file_id"),
             key_a32=opts.get("mega_key_a32"),
             file_size=opts.get("mega_file_size"),
+            folder_id=opts.get("mega_folder_id"),
             chunk_size=chunk_kb * 1024,
             progress_callback=progress_callback,
         )

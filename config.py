@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 import urllib3
 
-APP_VERSION = "0.1.69"
+APP_VERSION = "0.1.70"
 APP_VERSION_TAG = f"v{APP_VERSION}"
 
 _env_config = os.environ.get("CONFIG_DIR")
@@ -58,6 +58,7 @@ DEFAULT_SETTINGS = {
     "terabox_mode": "download",
     "terabox_save_path": "/",
     "naver_cafe_cookie": "",
+    "gdrive_cookie": "",
     "flaresolverr_url": "",
     "kone_auto_check": False,
     "kone_board_url": "https://kone.gg/s/retrogame",

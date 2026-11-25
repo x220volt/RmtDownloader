@@ -31,9 +31,11 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   { service: "FileKeeper", regex: /filekeeper\.net\/[a-zA-Z0-9_-]+/i },
   { service: "DataNodes", regex: /datanodes\.to\/[a-zA-Z0-9_-]+/i },
   { service: "Buzzheavier", regex: /(?:buzzheavier\.com|bzzhr\.to)\/[a-zA-Z0-9_-]+/i },
-  { service: "VikingFile", regex: /(?:vikingfile\.com|vik1ngfile\.site)\/f\//i },
+  { service: "VikingFile", regex: /(?:vik[i1]ngf[i1]le\.[a-z]{2,})\/[fd]\//i },
   { service: "MegaUp", regex: /megaup\.net\//i },
   { service: "Pixeldrain", regex: /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i },
+  { service: "TeeTeeTee", regex: /teeteetee-korean\.com\/(?:projects\/[a-zA-Z0-9_\-]+|api\/patch-releases|api\/[a-z0-9_\-]+-xdelta|downloads\/)/i },
+  { service: "Hangulteo", regex: /hangulteo\.com\/[a-zA-Z0-9_\-]+/i },
 ];
 
 const CLIPBOARD_FILE_EXT_REGEX = /\.(zip|rar|7z|tar|gz|bz2|xz|iso|bin|cue|chd|nsp|xci|nsz|apk|exe|msi|dmg|pkg|xdelta|bps|ips|ups|ppf|patch|mp4|mkv|avi|mov|webm|mp3|flac|wav|torrent)(\?.*)?$/i;

@@ -952,8 +952,11 @@ def canonical_url_key(url: str) -> str:
         host = (parsed.hostname or "").lower()
         path = parsed.path.rstrip("/")
 
-        # 구글 드라이브 (공유 링크, 직접 다운로드 링크, 파일 뷰어 링크 등)
+        # 구글 드라이브 (공유 링크, 직접 다운로드 링크, 파일 뷰어 링크, 공유 폴더 링크 등)
         if "drive.google.com" in host:
+            m_folder = re.search(r"/(?:drive/)?(?:u/\d+/)?folders/([a-zA-Z0-9_-]+)", path)
+            if m_folder:
+                return f"gdrive_folder:{m_folder.group(1)}"
             m_gd = re.search(r"/d/([a-zA-Z0-9_-]+)", path)
             if m_gd:
                 return f"gdrive:{m_gd.group(1)}"
@@ -1028,6 +1031,19 @@ def canonical_url_key(url: str) -> str:
                         return f"github:{gh_owner}/{gh_repo}:tag:{segs[4].lower()}"
                     elif len(segs) >= 6 and segs[2].lower() == "releases" and segs[3].lower() == "download":
                         return f"github:{gh_owner}/{gh_repo}:dl:{segs[4].lower()}:{segs[5].lower()}"
+
+        # TeeTeeTee 한글패치
+        if "teeteetee-korean.com" in host:
+            m_proj = re.search(r"/projects/([a-zA-Z0-9_\-]+)", path)
+            if m_proj:
+                return f"teeteetee:{m_proj.group(1).lower()}"
+
+        # 한글터 (hangulteo.com)
+        if "hangulteo.com" in host:
+            clean_path = path.strip("/")
+            if clean_path:
+                patch_id = clean_path.split("/")[0].lower()
+                return f"hangulteo:{patch_id}"
 
         # 일반 웹 다운로드 URL: 트래킹/불필요 쿼리 파라미터 제외하고 정규화
         if parsed.query:

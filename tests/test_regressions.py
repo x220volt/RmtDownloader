@@ -1790,6 +1790,7 @@ class DuplicateExclusionAndRetryTests(unittest.TestCase):
         # 1. can_handle 검증
         self.assertTrue(resolver.can_handle("https://vikingfile.com/f/vAXzgTjLOu"))
         self.assertTrue(resolver.can_handle("https://vik1ngfile.site/f/vAXzgTjLOu"))
+        self.assertTrue(resolver.can_handle("https://vik1ngf1le.online/f/SSkbCqs4D6"))
         self.assertTrue(
             resolver.can_handle("https://vikingfile.com/d/57Zu11aaT3/test.zip")
         )
@@ -2580,6 +2581,120 @@ class MegaResolverTests(unittest.TestCase):
             with self.assertRaises(ValueError) as cm:
                 resolver.resolve(url)
             self.assertIn("ENOENT", str(cm.exception))
+
+    def test_can_handle_folder(self):
+        from downloader.resolvers.dispatcher import default_dispatcher
+        from downloader.resolvers.mega import MegaResolver
+
+        resolver = MegaResolver()
+        folder_url = "https://mega.nz/folder/0Y8VjaTQ#bmjeUfx1mawqrLXQ4PLMfA"
+        self.assertTrue(resolver.can_handle(folder_url))
+        self.assertTrue(
+            resolver.can_handle(
+                "https://mega.nz/#F!0Y8VjaTQ!bmjeUfx1mawqrLXQ4PLMfA"
+            )
+        )
+        self.assertTrue(
+            resolver.can_handle(
+                "https://mega.nz/folder/0Y8VjaTQ#bmjeUfx1mawqrLXQ4PLMfA/file/8Q9XSJII"
+            )
+        )
+        disp = default_dispatcher.get_resolver(folder_url)
+        self.assertIsInstance(disp, MegaResolver)
+
+    def test_resolve_folder(self):
+        import base64
+        import struct
+        from unittest.mock import MagicMock, patch
+        from Cryptodome.Cipher import AES
+        from transferit._crypto import a32_to_bytes, b64_to_a32, b64url_encode, encrypt_attr
+        from downloader.resolvers.mega import MegaResolver
+
+        resolver = MegaResolver()
+        url = "https://mega.nz/folder/0Y8VjaTQ#bmjeUfx1mawqrLXQ4PLMfA"
+        folder_key = "bmjeUfx1mawqrLXQ4PLMfA"
+        master_key = a32_to_bytes(b64_to_a32(folder_key))
+        cipher = AES.new(master_key, AES.MODE_ECB)
+
+        # 1. Folder node
+        f_key_a32 = [1, 2, 3, 4]
+        enc_f_key = cipher.encrypt(struct.pack(">4I", *f_key_a32))
+        enc_f_k_str = f"root:{b64url_encode(enc_f_key)}"
+        enc_f_attr = b64url_encode(encrypt_attr({"n": "Sonic2_Folder"}, f_key_a32))
+
+        # 2. File 1 node
+        file1_key_a32 = [10, 20, 30, 40, 50, 60, 70, 80]
+        enc_f1_key = cipher.encrypt(struct.pack(">8I", *file1_key_a32))
+        enc_f1_k_str = f"root:{b64url_encode(enc_f1_key)}"
+        enc_f1_attr = b64url_encode(encrypt_attr({"n": "Sonic2_Patch1.zip"}, file1_key_a32))
+
+        # 3. File 2 node
+        file2_key_a32 = [11, 21, 31, 41, 51, 61, 71, 81]
+        enc_f2_key = cipher.encrypt(struct.pack(">8I", *file2_key_a32))
+        enc_f2_k_str = f"root:{b64url_encode(enc_f2_key)}"
+        enc_f2_attr = b64url_encode(encrypt_attr({"n": "Sonic2_Patch2.zip"}, file2_key_a32))
+
+        folder_resp = MagicMock()
+        folder_resp.status_code = 200
+        folder_resp.json.return_value = [{
+            "f": [
+                {"h": "root", "p": "outer", "t": 1, "k": enc_f_k_str, "a": enc_f_attr},
+                {"h": "file1", "p": "root", "t": 0, "k": enc_f1_k_str, "a": enc_f1_attr, "s": 2048},
+                {"h": "file2", "p": "root", "t": 0, "k": enc_f2_k_str, "a": enc_f2_attr, "s": 4096},
+            ]
+        }]
+
+        dl_resp = MagicMock()
+        dl_resp.status_code = 200
+        dl_resp.json.return_value = [{"g": "https://gfs.mega.co.nz/dl/file1_token", "s": 2048}]
+
+        def mock_post(req_url, **kwargs):
+            if "a=f" in req_url or (kwargs.get("json") and kwargs["json"][0].get("a") == "f"):
+                return folder_resp
+            return dl_resp
+
+        with patch("downloader.resolvers.mega.requests.post", side_effect=mock_post):
+            res = resolver.resolve(url)
+            self.assertEqual(res["filename"], "Sonic2_Patch1.zip")
+            self.assertEqual(res["size"], 2048)
+            self.assertEqual(res["subfolder"], "Sonic2_Folder")
+            self.assertEqual(res["url"], "https://gfs.mega.co.nz/dl/file1_token")
+            self.assertIn("extra_jobs", res)
+            self.assertEqual(len(res["extra_jobs"]), 1)
+            extra = res["extra_jobs"][0]
+            self.assertEqual(extra["filename"], "Sonic2_Patch2.zip")
+            self.assertEqual(extra["size"], 4096)
+            self.assertEqual(extra["options"]["mega_file_id"], "file2")
+            self.assertEqual(extra["options"]["mega_folder_id"], "0Y8VjaTQ")
+            self.assertEqual(extra["options"]["subfolder"], "Sonic2_Folder")
+
+    def test_resolve_with_options_fast_path(self):
+        from unittest.mock import MagicMock, patch
+        from downloader.resolvers.mega import MegaResolver
+
+        resolver = MegaResolver()
+        url = "https://mega.nz/folder/0Y8VjaTQ#bmjeUfx1mawqrLXQ4PLMfA/file/file2"
+        options = {
+            "mega_file_id": "file2",
+            "mega_key_a32": [1, 2, 3, 4, 5, 6, 7, 8],
+            "mega_file_size": 4096,
+            "mega_folder_id": "0Y8VjaTQ",
+            "filename": "Sonic2_Patch2.zip",
+            "subfolder": "Sonic2_Folder",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = [{"g": "https://gfs.mega.co.nz/dl/file2_token", "s": 4096}]
+
+        with patch("downloader.resolvers.mega.requests.post", return_value=mock_resp) as mock_post:
+            res = resolver.resolve(url, options=options)
+            self.assertEqual(res["filename"], "Sonic2_Patch2.zip")
+            self.assertEqual(res["size"], 4096)
+            self.assertEqual(res["url"], "https://gfs.mega.co.nz/dl/file2_token")
+            self.assertEqual(res["subfolder"], "Sonic2_Folder")
+            # Should only make 1 post call directly for download URL (not querying folder list)
+            mock_post.assert_called_once()
 
 
 class NaverMyBoxResolverTests(unittest.TestCase):

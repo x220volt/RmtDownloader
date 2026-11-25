@@ -8,7 +8,7 @@ class VikingFileAddon(HostingAddon):
     addon_id = "vikingfile"
     name = "VikingFile"
     category = "cloud"
-    domains = ["vikingfile.com", "vik1ngfile.site"]
+    domains = ["vikingfile.com", "vik1ngfile.site", "vik1ngf1le.online"]
     badge_class = "badge-viking"
     badge_label = "VikingFile"
     badge_style = {

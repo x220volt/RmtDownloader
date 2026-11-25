@@ -336,8 +336,10 @@ class NaverCafeResolver(BaseResolver):
                         wp_res["subfolder"] = clean_subfolder
                         wp_res["source_page_url"] = url
                         return wp_res
-                    except Exception:
-                        pass
+                    except (PermissionError, RuntimeError):
+                        raise
+                    except Exception as e:
+                        logger.warning(f"[Naver Cafe] 본문 링크 해석 실패: {e}")
                 raise FileNotFoundError(
                     f"게시글 '{subject}'에 다운로드 가능한 첨부파일이 없습니다."
                 )

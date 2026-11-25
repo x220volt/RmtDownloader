@@ -1,8 +1,10 @@
 """MEGA (mega.nz) 링크 리졸버 및 AES-128-CTR 스트리밍 복호화 다운로더 모듈."""
 
+import base64
 import logging
 import os
 import re
+import struct
 import time
 from contextlib import ExitStack
 
@@ -12,6 +14,7 @@ from Cryptodome.Cipher import AES
 from Cryptodome.Util import Counter
 from transferit._crypto import a32_to_bytes, attr_key, b64_to_a32, decrypt_attr
 
+from ..callbacks import safe_callback
 from ..engine import (
     _FINALIZE_LOCK,
     _parse_content_range,
@@ -20,8 +23,6 @@ from ..engine import (
     sanitize_filename,
 )
 from .base import BaseResolver
-
-from ..callbacks import safe_callback
 
 logger = logging.getLogger(__name__)
 
@@ -43,27 +44,79 @@ MEGA_ERRORS = {
 }
 
 
+def decrypt_node_key(k_str: str, cipher: AES) -> list[int] | None:
+    """MEGA 폴더 노드의 암호화된 키 문자열(k)을 복호화하여 32비트 정수 리스트(key_a32)로 반환합니다."""
+    if not k_str:
+        return None
+    for part in k_str.split("/"):
+        if ":" in part:
+            _, enc_b64 = part.split(":", 1)
+        else:
+            enc_b64 = part
+        try:
+            pad = -len(enc_b64) % 4
+            raw_b64 = enc_b64 + "=" * pad
+            enc_bytes = base64.b64decode(raw_b64.replace("-", "+").replace("_", "/"))
+            if len(enc_bytes) % 16 != 0:
+                continue
+            dec_bytes = cipher.decrypt(enc_bytes)
+            return list(struct.unpack(">" + "I" * (len(dec_bytes) // 4), dec_bytes))
+        except Exception:
+            continue
+    return None
+
+
 def parse_mega_url(url: str) -> dict | None:
     """
     다양한 형태의 mega.nz / mega.co.nz URL을 파싱하여 식별자와 키를 추출합니다.
-    - https://mega.nz/file/{file_id}#{file_key}
-    - https://mega.nz/#!{file_id}!{file_key}
-    - https://mega.co.nz/#!{file_id}!{file_key}
+    - 파일:
+      - https://mega.nz/file/{file_id}#{file_key}
+      - https://mega.nz/#!{file_id}!{file_key}
+      - https://mega.co.nz/#!{file_id}!{file_key}
+    - 폴더:
+      - https://mega.nz/folder/{folder_id}#{folder_key}
+      - https://mega.nz/folder/{folder_id}#{folder_key}/file/{file_id}
+      - https://mega.nz/#F!{folder_id}!{folder_key}
+      - https://mega.nz/#F!{folder_id}!{folder_key}!{file_id}
     """
     if not url:
         return None
     url = url.strip()
 
-    # 1. 신규 포맷: /file/<id>#<key>
+    # 1. Folder 신규 포맷: /folder/<id>#<key> 또는 /folder/<id>#<key>/file/<file_id>
     m = re.search(
-        r"mega\.(?:nz|co\.nz|io)/file/([a-zA-Z0-9_-]{8})[#]([a-zA-Z0-9_-]{22,64})", url
+        r"mega\.(?:nz|co\.nz|io)/folder/([a-zA-Z0-9_-]{8})[#]([a-zA-Z0-9_-]{22,64})(?:/file/([a-zA-Z0-9_-]+))?",
+        url,
+    )
+    if m:
+        res = {"type": "folder", "id": m.group(1), "key": m.group(2)}
+        if m.group(3):
+            res["target_file_id"] = m.group(3)
+        return res
+
+    # 2. Folder 레거시 포맷: /#F!<id>!<key> 또는 /#F!<id>!<key>!<file_id>
+    m = re.search(
+        r"mega\.(?:nz|co\.nz|io)/#\??!?F!([a-zA-Z0-9_-]{8})!([a-zA-Z0-9_-]{22,64})(?:!([a-zA-Z0-9_-]+))?",
+        url,
+    )
+    if m:
+        res = {"type": "folder", "id": m.group(1), "key": m.group(2)}
+        if m.group(3):
+            res["target_file_id"] = m.group(3)
+        return res
+
+    # 3. File 신규 포맷: /file/<id>#<key>
+    m = re.search(
+        r"mega\.(?:nz|co\.nz|io)/file/([a-zA-Z0-9_-]{8})[#]([a-zA-Z0-9_-]{22,64})",
+        url,
     )
     if m:
         return {"type": "file", "id": m.group(1), "key": m.group(2)}
 
-    # 2. 레거시 포맷: /#!<id>!<key> 또는 /#<id>!<key>
+    # 4. File 레거시 포맷: /#!<id>!<key> 또는 /#<id>!<key>
     m = re.search(
-        r"mega\.(?:nz|co\.nz|io)/#?!([a-zA-Z0-9_-]{8})!([a-zA-Z0-9_-]{22,64})", url
+        r"mega\.(?:nz|co\.nz|io)/#\??!?([a-zA-Z0-9_-]{8})!([a-zA-Z0-9_-]{22,64})",
+        url,
     )
     if m:
         return {"type": "file", "id": m.group(1), "key": m.group(2)}
@@ -82,6 +135,7 @@ class MegaDownloadTask:
         file_id: str | None = None,
         key_a32: list[int] | None = None,
         file_size: int | None = None,
+        folder_id: str | None = None,
         chunk_size: int = 512 * 1024,
         progress_callback=None,
         partial_id: str = "",
@@ -93,6 +147,7 @@ class MegaDownloadTask:
         self.file_id = file_id
         self.key_a32 = key_a32
         self.file_size = file_size
+        self.folder_id = folder_id
         self.chunk_size = chunk_size
         self.progress_callback = safe_callback(progress_callback)
 
@@ -124,16 +179,65 @@ class MegaDownloadTask:
         # file_id 및 key_a32 확보
         if not self.file_id or not self.key_a32:
             parsed = parse_mega_url(self.url)
-            if not parsed or parsed.get("type") != "file":
+            if not parsed:
                 raise ValueError(f"유효하지 않은 MEGA URL입니다: {self.url}")
-            self.file_id = parsed["id"]
-            self.key_a32 = b64_to_a32(parsed["key"])
+            if parsed.get("type") == "folder":
+                self.folder_id = parsed["id"]
+                folder_key = parsed["key"]
+                target_file_id = parsed.get("target_file_id")
+                master_key = a32_to_bytes(b64_to_a32(folder_key))
+                cipher = AES.new(master_key, AES.MODE_ECB)
+                resp = requests.post(
+                    f"{MEGA_API_URL}?id=0&n={self.folder_id}",
+                    json=[{"a": "f", "c": 1, "r": 1, "ca": 1}],
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                res_data = resp.json()[0]
+                if isinstance(res_data, int):
+                    err_text = MEGA_ERRORS.get(res_data, f"에러 코드 {res_data}")
+                    raise ValueError(f"MEGA 폴더 정보를 가져올 수 없습니다: {err_text}")
+                nodes = res_data.get("f", [])
+                found_node = None
+                for n in nodes:
+                    if n.get("t") == 0:
+                        if not target_file_id or n.get("h") == target_file_id:
+                            found_node = n
+                            break
+                if not found_node:
+                    raise FileNotFoundError(
+                        "MEGA 폴더 내에서 다운로드할 파일을 찾을 수 없습니다."
+                    )
+                self.file_id = found_node["h"]
+                self.file_size = int(found_node.get("s") or 0)
+                dec_ints = decrypt_node_key(found_node.get("k", ""), cipher)
+                if not dec_ints:
+                    raise ValueError("MEGA 파일 키 복호화에 실패했습니다.")
+                self.key_a32 = dec_ints
+                if not self.filename and found_node.get("a"):
+                    try:
+                        attrs = decrypt_attr(found_node["a"], dec_ints)
+                        if attrs and attrs.get("n"):
+                            self.filename = attrs["n"]
+                    except Exception:
+                        pass
+            elif parsed.get("type") == "file":
+                self.file_id = parsed["id"]
+                self.key_a32 = b64_to_a32(parsed["key"])
+            else:
+                raise ValueError(f"유효하지 않은 MEGA URL입니다: {self.url}")
 
         # 최신 다운로드 정보 및 URL 요청
         try:
+            if self.folder_id:
+                api_req_url = f"{MEGA_API_URL}?id=0&n={self.folder_id}"
+                payload = [{"a": "g", "g": 1, "ssl": 2, "n": self.file_id}]
+            else:
+                api_req_url = MEGA_API_URL
+                payload = [{"a": "g", "g": 1, "ssl": 2, "p": self.file_id}]
             resp = requests.post(
-                MEGA_API_URL,
-                json=[{"a": "g", "g": 1, "ssl": 2, "p": self.file_id}],
+                api_req_url,
+                json=payload,
                 timeout=20,
             )
             resp.raise_for_status()
@@ -367,10 +471,277 @@ class MegaResolver(BaseResolver):
         return parse_mega_url(url) is not None
 
     def resolve(self, url: str, options: dict | None = None) -> dict:
+        opts = options or {}
+
+        # 1. 후속 작업(extra_jobs) 또는 옵션으로 파일 ID 및 복호화 키가 직접 전달된 경우 바로 발급
+        if opts.get("mega_file_id") and opts.get("mega_key_a32"):
+            file_id = opts["mega_file_id"]
+            key_a32 = opts["mega_key_a32"]
+            file_size = int(opts.get("mega_file_size") or 0)
+            folder_id = opts.get("mega_folder_id")
+            filename = opts.get("filename") or f"mega_{file_id}.bin"
+            subfolder = opts.get("subfolder") or ""
+            article_title = opts.get("article_title") or ""
+            source_page_url = opts.get("source_page_url") or url
+
+            logger.info(f"MEGA 지정 파일 다운로드 주소 발급 중 (ID: {file_id})...")
+            if folder_id:
+                api_req_url = f"{MEGA_API_URL}?id=0&n={folder_id}"
+                payload = [{"a": "g", "g": 1, "ssl": 2, "n": file_id}]
+            else:
+                api_req_url = MEGA_API_URL
+                payload = [{"a": "g", "g": 1, "ssl": 2, "p": file_id}]
+
+            try:
+                resp = requests.post(api_req_url, json=payload, timeout=20)
+                resp.raise_for_status()
+                res_list = resp.json()
+                if not isinstance(res_list, list) or not res_list:
+                    raise ValueError("MEGA API로부터 비어있는 응답을 받았습니다.")
+                res_data = res_list[0]
+            except Exception as e:
+                raise ValueError(f"MEGA 링크 정보를 가져올 수 없습니다: {e}")
+
+            if isinstance(res_data, int):
+                err_text = MEGA_ERRORS.get(res_data, f"에러 코드 {res_data}")
+                raise ValueError(f"MEGA 파일 정보를 불러오지 못했습니다: {err_text}")
+
+            dl_url = res_data.get("g")
+            if not dl_url:
+                raise ValueError("MEGA 다운로드 직링크(g)가 응답에 없습니다.")
+
+            file_size = int(res_data.get("s") or file_size or 0)
+            if not filename or filename.startswith("mega_"):
+                enc_attr = res_data.get("at")
+                if enc_attr:
+                    try:
+                        attrs = decrypt_attr(enc_attr, key_a32)
+                        if attrs and attrs.get("n"):
+                            filename = sanitize_filename(attrs["n"])
+                    except Exception as e:
+                        logger.warning(f"MEGA 파일명 속성 복호화 실패: {e}")
+
+            return {
+                "url": dl_url,
+                "filename": filename,
+                "size": file_size,
+                "file_size": file_size,
+                "subfolder": subfolder,
+                "article_title": article_title,
+                "source_page_url": source_page_url,
+                "source_service": "MEGA",
+                "options": {
+                    "mega_file_id": file_id,
+                    "mega_key_a32": key_a32,
+                    "mega_file_size": file_size,
+                    "mega_folder_id": folder_id,
+                    "subfolder": subfolder,
+                    "article_title": article_title,
+                    "source_page_url": source_page_url,
+                },
+                "task_factory": lambda job, dest_dir, progress_cb: MegaDownloadTask(
+                    url=url,
+                    dest_dir=dest_dir,
+                    filename=filename,
+                    file_id=file_id,
+                    key_a32=key_a32,
+                    file_size=file_size,
+                    folder_id=folder_id,
+                    progress_callback=progress_cb,
+                    partial_id=job.id,
+                ),
+            }
+
         parsed = parse_mega_url(url)
-        if not parsed or parsed.get("type") != "file":
+        if not parsed:
             raise ValueError(f"지원하지 않는 MEGA URL 형식입니다: {url}")
 
+        # 2. MEGA 공유 폴더 링크 처리
+        if parsed.get("type") == "folder":
+            folder_id = parsed["id"]
+            folder_key = parsed["key"]
+            target_file_id = parsed.get("target_file_id")
+
+            logger.info(f"MEGA 공유 폴더 조회 중 (Folder ID: {folder_id})...")
+            try:
+                resp = requests.post(
+                    f"{MEGA_API_URL}?id=0&n={folder_id}",
+                    json=[{"a": "f", "c": 1, "r": 1, "ca": 1}],
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                res_list = resp.json()
+                if not isinstance(res_list, list) or not res_list:
+                    raise ValueError("MEGA API로부터 비어있는 응답을 받았습니다.")
+                res_data = res_list[0]
+            except Exception as e:
+                raise ValueError(f"MEGA 폴더 정보를 가져올 수 없습니다: {e}")
+
+            if isinstance(res_data, int):
+                err_text = MEGA_ERRORS.get(res_data, f"에러 코드 {res_data}")
+                raise ValueError(f"MEGA 폴더 정보를 불러오지 못했습니다: {err_text}")
+
+            nodes = res_data.get("f", [])
+            master_key = a32_to_bytes(b64_to_a32(folder_key))
+            cipher = AES.new(master_key, AES.MODE_ECB)
+
+            folder_map = {}  # handle -> {'name': name, 'parent': parent}
+            file_nodes = []
+            detected_folder_name = ""
+
+            for n in nodes:
+                t = n.get("t")
+                h = n.get("h")
+                p = n.get("p")
+                k_str = n.get("k", "")
+                dec_ints = decrypt_node_key(k_str, cipher)
+                if not dec_ints:
+                    continue
+                attrs = {}
+                if n.get("a"):
+                    try:
+                        attrs = decrypt_attr(n["a"], dec_ints) or {}
+                    except Exception:
+                        pass
+                name = attrs.get("n", "")
+
+                if t == 1:
+                    folder_map[h] = {"name": name, "parent": p}
+                    if not detected_folder_name and name:
+                        detected_folder_name = sanitize_filename(name)
+                elif t == 0:
+                    file_nodes.append(
+                        {
+                            "id": h,
+                            "parent": p,
+                            "name": sanitize_filename(name or f"mega_{h}.bin"),
+                            "size": int(n.get("s") or 0),
+                            "key_a32": dec_ints,
+                        }
+                    )
+
+            folder_title = detected_folder_name or f"mega_{folder_id}"
+
+            def get_rel_path(parent_handle: str) -> str:
+                path_parts = []
+                curr = parent_handle
+                while curr in folder_map:
+                    f_info = folder_map[curr]
+                    p = f_info.get("parent")
+                    if p in folder_map:
+                        path_parts.append(f_info["name"])
+                        curr = p
+                    else:
+                        break
+                path_parts.reverse()
+                return os.path.join(*path_parts) if path_parts else ""
+
+            if target_file_id:
+                matching = [f for f in file_nodes if f["id"] == target_file_id]
+                if not matching:
+                    raise FileNotFoundError(
+                        f"MEGA 폴더 내에서 파일 {target_file_id}을 찾을 수 없습니다."
+                    )
+                file_nodes = matching
+
+            if not file_nodes:
+                raise FileNotFoundError(
+                    "MEGA 폴더에 다운로드 가능한 파일이 존재하지 않습니다."
+                )
+
+            primary_file = file_nodes[0]
+            primary_rel = get_rel_path(primary_file["parent"])
+            primary_subfolder = (
+                os.path.join(folder_title, primary_rel)
+                if primary_rel
+                else folder_title
+            )
+
+            # 첫 번째 파일의 다운로드 직링크 요청
+            try:
+                dl_resp = requests.post(
+                    f"{MEGA_API_URL}?id=0&n={folder_id}",
+                    json=[{"a": "g", "g": 1, "ssl": 2, "n": primary_file["id"]}],
+                    timeout=20,
+                )
+                dl_resp.raise_for_status()
+                dl_data = dl_resp.json()[0]
+                if isinstance(dl_data, int):
+                    err_text = MEGA_ERRORS.get(dl_data, f"에러 코드 {dl_data}")
+                    raise ValueError(
+                        f"MEGA 파일 다운로드 주소를 발급하지 못했습니다: {err_text}"
+                    )
+                dl_url = dl_data.get("g")
+                if not dl_url:
+                    raise ValueError("MEGA 다운로드 직링크(g)가 응답에 없습니다.")
+            except Exception as e:
+                raise ValueError(f"MEGA 파일 직링크 요청 실패: {e}")
+
+            extra_jobs = []
+            if len(file_nodes) > 1 and not target_file_id:
+                for f in file_nodes[1:]:
+                    f_rel = get_rel_path(f["parent"])
+                    f_sub = (
+                        os.path.join(folder_title, f_rel)
+                        if f_rel
+                        else folder_title
+                    )
+                    extra_jobs.append(
+                        {
+                            "url": f"https://mega.nz/folder/{folder_id}#{folder_key}/file/{f['id']}",
+                            "filename": f["name"],
+                            "size": f["size"],
+                            "options": {
+                                "mega_file_id": f["id"],
+                                "mega_key_a32": f["key_a32"],
+                                "mega_file_size": f["size"],
+                                "mega_folder_id": folder_id,
+                                "filename": f["name"],
+                                "subfolder": f_sub,
+                                "article_title": folder_title,
+                                "source_page_url": url,
+                            },
+                        }
+                    )
+
+            logger.info(
+                f"MEGA 폴더 분석 완료: '{folder_title}' 총 {len(file_nodes)}개 파일 "
+                f"(첫 파일: {primary_file['name']}, 추가 큐: {len(extra_jobs)}개)"
+            )
+
+            return {
+                "url": dl_url,
+                "filename": primary_file["name"],
+                "size": primary_file["size"],
+                "file_size": primary_file["size"],
+                "subfolder": primary_subfolder,
+                "article_title": folder_title,
+                "source_page_url": url,
+                "source_service": "MEGA",
+                "options": {
+                    "mega_file_id": primary_file["id"],
+                    "mega_key_a32": primary_file["key_a32"],
+                    "mega_file_size": primary_file["size"],
+                    "mega_folder_id": folder_id,
+                    "subfolder": primary_subfolder,
+                    "article_title": folder_title,
+                    "source_page_url": url,
+                },
+                "task_factory": lambda job, dest_dir, progress_cb: MegaDownloadTask(
+                    url=url,
+                    dest_dir=dest_dir,
+                    filename=primary_file["name"],
+                    file_id=primary_file["id"],
+                    key_a32=primary_file["key_a32"],
+                    file_size=primary_file["size"],
+                    folder_id=folder_id,
+                    progress_callback=progress_cb,
+                    partial_id=job.id,
+                ),
+                "extra_jobs": extra_jobs,
+            }
+
+        # 3. MEGA 단일 파일 링크 처리
         file_id = parsed["id"]
         file_key_b64 = parsed["key"]
         key_a32 = b64_to_a32(file_key_b64)

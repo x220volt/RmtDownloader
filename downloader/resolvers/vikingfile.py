@@ -6,6 +6,7 @@ Cloudflare Turnstile 보호를 DrissionPage(로컬 스텔스 브라우저) 또�
 
 import logging
 import os
+import re
 import time
 from typing import Any, Optional
 from urllib.parse import unquote, urljoin, urlparse
@@ -25,12 +26,16 @@ VIKINGFILE_USER_AGENT = (
 )
 TIMEOUT = 30
 
+VIKINGFILE_HOST_RE = re.compile(
+    r"^(?:[a-z0-9\-]+\.)*vik[i1]ngf[i1]le\.[a-z]{2,}$", re.I
+)
+
 
 def _is_vikingfile_host(hostname: str | None) -> bool:
-    host = (hostname or "").lower().rstrip(".")
-    return host in ("vikingfile.com", "vik1ngfile.site") or host.endswith(
-        (".vikingfile.com", ".vik1ngfile.site")
-    )
+    if not hostname:
+        return False
+    host = hostname.lower().rstrip(".")
+    return bool(VIKINGFILE_HOST_RE.match(host))
 
 
 def _extract_download_url(html: str, page_url: str) -> Optional[str]:
@@ -227,7 +232,7 @@ class VikingFileResolver(BaseResolver):
                 session.headers.update(
                     {
                         "User-Agent": VIKINGFILE_USER_AGENT,
-                        "Referer": "https://vikingfile.com/",
+                        "Referer": f"{parsed.scheme}://{parsed.netloc}/",
                     }
                 )
                 try:
@@ -313,7 +318,9 @@ class VikingFileResolver(BaseResolver):
                     except Exception as e:
                         logger.error(f"[VikingFile] DrissionPage 우회 실패: {e}")
                         raise ValueError(
-                            f"VikingFile Cloudflare 우회 및 다운로드 링크 추출 실패: {e}"
+                            f"VikingFile Cloudflare Turnstile 자동 인증에 실패했습니다: {e}. "
+                            "브라우저에서 해당 페이지를 직접 열어 사람 확인(Turnstile)을 통과한 후, "
+                            "생성된 다운로드 버튼의 직링크(/d/...) 주소를 복사하여 추가해 주세요."
                         )
 
         if not download_url:

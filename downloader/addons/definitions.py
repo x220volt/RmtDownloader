@@ -30,6 +30,8 @@ from .services.rootz import RootzAddon
 from .services.naver_mybox import NaverMyBoxAddon
 from .services.naver_cafe import NaverCafeAddon
 from .services.tistory import TistoryAddon
+from .services.teeteetee import TeeTeeTeeAddon
+from .services.hangulteo import HangulteoAddon
 from .services.selica import SelicaAddon
 from .services.webpage import WebPageAddon
 from .services.direct import DirectAddon
@@ -43,6 +45,7 @@ __all__ = [
     "GitHubAddon",
     "GofileAddon",
     "GoogleDriveAddon",
+    "HangulteoAddon",
     "KioAddon",
     "MediaFireAddon",
     "MegaAddon",
@@ -56,6 +59,7 @@ __all__ = [
     "RomspureAddon",
     "RootzAddon",
     "SelicaAddon",
+    "TeeTeeTeeAddon",
     "TeraBoxAddon",
     "TistoryAddon",
     "TorrentAddon",
@@ -79,6 +83,8 @@ def register_default_addons(registry) -> None:
         NaverMyBoxAddon(),
         NaverCafeAddon(),
         TistoryAddon(),
+        TeeTeeTeeAddon(),
+        HangulteoAddon(),
         SelicaAddon(),
         TeraBoxAddon(),
         GigaFileAddon(),

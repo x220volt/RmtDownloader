@@ -4,6 +4,22 @@
 
 ---
 
+## [v0.1.70] - 2026-11-26
+- **✨ 주요 기능 및 버그 수정**:
+  - **MEGA 공유 폴더 및 다중 파일 실시간 복호화 다운로드 지원 (`downloader/resolvers/mega.py`, `downloader/addons/services/mega.py`)**:
+    - MEGA 공유 폴더 링크(`/folder/{folder_id}#{folder_key}`, `/#F!{folder_id}!{folder_key}`) 파싱 및 리졸브 지원.
+    - 폴더 마스터 키(AES-128-ECB)를 통해 노드 트리 및 파일 속성을 복호화하고, 최상위 폴더명을 서브폴더로 자동 지정.
+    - 폴더 내 복수 파일들을 `extra_jobs`로 자동 큐잉하여 동일 서브폴더에 순차 다운로드되도록 연계.
+    - 후속 작업 처리 시 폴더 전체 재조회 없이 지정 노드 직링크를 즉시 발급하는 고속 경로(Fast-path) 적용.
+    - 일시중지/재개 및 서버 재시작 시 `mega_folder_id`를 보존하여 다운로드 작업이 정상 복원되도록 개선.
+  - **한글터 및 티티티 프로젝트 한글패치 링크 추출 지원 (`downloader/resolvers/hangulteo.py`, `downloader/resolvers/teeteetee.py`, `downloader/addons/`)**:
+    - 한글터(`hangulteo.com`) 프로젝트 페이지 및 연결된 GitHub 릴리즈 다운로드 링크 자동 추출 및 서브폴더 다운로드 지원.
+    - 티티티(`teeteetee-korean.com`) 프로젝트 및 블로그 페이지 내 실제 다운로드 링크 자동 추출 지원.
+  - **Vikingfile 도메인 및 다운로드 연동 보강 (`downloader/resolvers/vikingfile.py`, `downloader/addons/services/vikingfile.py`)**:
+    - 최신 도메인(`vik1ngf1le.online`) 지원 및 파일 다운로드 분석 안정화.
+
+---
+
 ## [v0.1.69] - 2026-11-21
 - **✨ 주요 기능 및 버그 수정**:
   - **네이버 카페 모바일 웹/앱 공유 링크 지원 및 파싱 강화 (`downloader/resolvers/naver_cafe.py`, `downloader/addons/services/naver_cafe.py`)**:
