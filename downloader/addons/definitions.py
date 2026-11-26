@@ -6,6 +6,7 @@ Service implementations live in services/<addon_id>.py.
 from .services.torrent import TorrentAddon
 from .services.gofile import GofileAddon
 from .services.vikingfile import VikingFileAddon
+from .services.akirabox import AkiraBoxAddon
 from .services.mediafire import MediaFireAddon
 from .services.filekeeper import FileKeeperAddon
 from .services.datanodes import DataNodesAddon
@@ -37,6 +38,7 @@ from .services.webpage import WebPageAddon
 from .services.direct import DirectAddon
 
 __all__ = [
+    "AkiraBoxAddon",
     "BuzzheavierAddon",
     "DataNodesAddon",
     "DirectAddon",
@@ -78,6 +80,7 @@ def register_default_addons(registry) -> None:
     default_addons = [
         TorrentAddon(),
         GofileAddon(),
+        AkiraBoxAddon(),
         VikingFileAddon(),
         MegaUpAddon(),
         NaverMyBoxAddon(),

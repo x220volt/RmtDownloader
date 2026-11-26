@@ -43,6 +43,7 @@
     { service: "FileKeeper", regex: /filekeeper\.net\/[a-zA-Z0-9_-]+/i },
     { service: "DataNodes", regex: /datanodes\.to\/[a-zA-Z0-9_-]+/i },
     { service: "Buzzheavier", regex: /(?:buzzheavier\.com|bzzhr\.to)\/[a-zA-Z0-9_-]+/i },
+    { service: "AkiraBox", regex: /akirabox\.(?:to|com|net)\/(?:[a-zA-Z0-9_-]+\/file|[a-zA-Z0-9_-]+)/i },
     { service: "VikingFile", regex: /(?:vik[i1]ngf[i1]le\.[a-z]{2,})\/[fd]\//i },
     { service: "MegaUp", regex: /megaup\.net\//i },
     { service: "Pixeldrain", regex: /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i },

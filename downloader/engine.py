@@ -221,6 +221,44 @@ def _validate_file_response(response, url, filename: str = ""):
 
     explicit_html = is_attachment and _is_html_filename(header_filename)
     if is_html_ct and not explicit_html:
+        html_sample = ""
+        try:
+            for chunk in response.iter_content(chunk_size=4096):
+                html_sample = chunk.decode("utf-8", errors="ignore")
+                break
+        except Exception:
+            pass
+
+        if (
+            "Too many users" in html_sample
+            or "Quota exceeded" in html_sample
+            or "최근에 너무 많은 사용자" in html_sample
+            or "용량 초과" in html_sample
+        ):
+            raise PermissionError(
+                "Google Drive 일일 다운로드 할당량(24시간)이 초과되어 현재 직접 다운로드할 수 없습니다. "
+                "(최근에 너무 많은 사용자가 이 파일을 보거나 다운로드했습니다.)\n\n"
+                "💡 [우회 다운로드 방법 - 사본 만들기]:\n"
+                "1. 웹 브라우저에서 본인 구글 계정으로 로그인한 상태로 해당 파일 링크를 엽니다.\n"
+                "2. 우측 상단의 '내 드라이브에 바로가기 추가' 또는 메뉴에서 '사본 만들기(Make a copy)'를 실행합니다.\n"
+                "3. 내 드라이브에 새로 생성된 사본 파일('사본 - ...')의 공유 링크를 원격 다운로더에 입력하시면 대역폭 제한 없이 즉시 다운로드됩니다."
+            )
+        if (
+            "infected with a virus" in html_sample.lower()
+            or "감염된 파일" in html_sample
+        ):
+            raise PermissionError(
+                "Google Drive 파일 다운로드 불가: 구글 바이러스 검사에서 악성 파일로 감지되어 소유자 계정으로만 다운로드가 허용됩니다."
+            )
+        if "액세스 권한 필요" in html_sample or "You need access" in html_sample:
+            raise PermissionError(
+                "Google Drive 파일 접근 권한이 필요합니다. 공유 설정을 확인하세요."
+            )
+        if "challenges.cloudflare.com" in html_sample or "cf-turnstile" in html_sample:
+            raise ValueError(
+                "다운로드 대상이 Cloudflare 보안 확인(보안 캡차) 페이지입니다. 직링크를 확인해주세요."
+            )
+
         raise ValueError("다운로드 링크가 아닌 웹페이지(HTML)가 수신되었습니다.")
 
     is_json_ct = content_type in ("application/json", "text/json")

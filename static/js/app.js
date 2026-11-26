@@ -50,6 +50,7 @@ const settingMaxWorkers = document.getElementById('settingMaxWorkers');
 const settingGofileToken = document.getElementById('settingGofileToken');
 const settingTeraboxCookie = document.getElementById('settingTeraboxCookie');
 const settingNaverCafeCookie = document.getElementById('settingNaverCafeCookie');
+const settingGdriveCookie = document.getElementById('settingGdriveCookie');
 const toastContainer = document.getElementById('toastContainer');
 
 // ==========================================
@@ -1584,6 +1585,7 @@ async function openSettings() {
       settingGofileToken.value = data.gofile_token || '';
       if (settingTeraboxCookie) settingTeraboxCookie.value = data.terabox_cookie || '';
       if (settingNaverCafeCookie) settingNaverCafeCookie.value = data.naver_cafe_cookie || '';
+      if (settingGdriveCookie) settingGdriveCookie.value = data.gdrive_cookie || '';
       const autoPwdVal = data.auto_passwords || data.terabox_password || '';
       const settingAutoPasswords = document.getElementById('settingAutoPasswords');
       if (settingAutoPasswords) settingAutoPasswords.value = autoPwdVal;
@@ -1686,6 +1688,7 @@ async function saveSettings(e) {
     gofile_token: settingGofileToken.value.trim(),
     terabox_cookie: settingTeraboxCookie ? settingTeraboxCookie.value.trim() : '',
     naver_cafe_cookie: settingNaverCafeCookie ? settingNaverCafeCookie.value.trim() : '',
+    gdrive_cookie: settingGdriveCookie ? settingGdriveCookie.value.trim() : '',
     auto_passwords: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
     terabox_password: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
     terabox_mode: settingTeraboxMode ? settingTeraboxMode.value : 'download',

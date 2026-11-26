@@ -4,6 +4,23 @@
 
 ---
 
+## [v0.1.71] - 2026-11-27
+- **✨ 주요 기능 및 버그 수정**:
+  - **AkiraBox 파일 호스팅 다운로드 지원 및 파일명 정밀 추출 (`downloader/resolvers/akirabox.py`, `downloader/addons/services/akirabox.py`)**:
+    - `akirabox.to`, `akirabox.com`, `akirabox.net` URL 패턴 및 CDN 직링크 파싱 지원.
+    - DrissionPage 스텔스 브라우저 세션을 통해 Cloudflare Turnstile을 자동 통과하여 고속 직링크 및 세션 쿠키 추출.
+    - Next.js 내부 컴포넌트(`Next.MetadataOutlet`) 오인식을 방지하고 `og:title`, `twitter:title`, `<h1>`, Next.js 파일 객체에서 파일명, 크기, SHA-256을 정밀 추출하도록 개선.
+    - 직링크 경로의 `+` 공백 복원(`unquote_plus`), 게스트 해시 접두사 및 중복 확장자(`.zip.zip` → `.zip`) 자동 정리.
+  - **Google Drive 할당량 초과 감지 및 안내 개선 (`downloader/resolvers/gdrive.py`, `downloader/engine.py`, `downloader/aria2_http_engine.py`)**:
+    - 구글 드라이브 일일 다운로드 할당량 초과 오류를 정확히 식별하고 '내 드라이브에 사본 만들기' 가이드 메시지 안내.
+    - 구글 드라이브 계정 쿠키 설정 UI 및 인증 다운로드 연동 지원.
+  - **aria2c 엔진 한글 파일명 덮어쓰기 방어 (`downloader/aria2_http_engine.py`)**:
+    - 서버 응답 헤더의 ASCII 대체 파일명(`filename="[_] ___ __.zip"`)으로 인해 aria2 완료 시 유효한 한글 파일명이 훼손되지 않도록 보호.
+  - **Chrome 확장 프로그램 AkiraBox 지원 (`extension/`)**:
+    - AkiraBox 도메인 인식 및 [현재 탭 전송] 시 실제 파일명과 직링크 동시 전송 지원, 태그 뱃지 스타일 추가.
+
+---
+
 ## [v0.1.70] - 2026-11-26
 - **✨ 주요 기능 및 버그 수정**:
   - **MEGA 공유 폴더 및 다중 파일 실시간 복호화 다운로드 지원 (`downloader/resolvers/mega.py`, `downloader/addons/services/mega.py`)**:

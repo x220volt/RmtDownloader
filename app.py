@@ -1668,6 +1668,7 @@ def get_settings():
             "download_dir": s.get("download_dir"),
             "max_concurrent_downloads": s.get("max_concurrent_downloads", 3),
             "gofile_token": s.get("gofile_token", ""),
+            "gdrive_cookie": s.get("gdrive_cookie", ""),
             "terabox_cookie": s.get("terabox_cookie", ""),
             "naver_cafe_cookie": s.get("naver_cafe_cookie", ""),
             "terabox_password": s.get("terabox_password", ""),
@@ -1798,6 +1799,7 @@ def update_settings():
                 "max_concurrent_downloads": updated.get("max_concurrent_downloads"),
                 "auth_username": updated.get("auth_username"),
                 "terabox_cookie": updated.get("terabox_cookie"),
+                "gdrive_cookie": updated.get("gdrive_cookie"),
                 "naver_cafe_cookie": updated.get("naver_cafe_cookie"),
                 "terabox_password": updated.get("terabox_password"),
                 "auto_passwords": updated.get(

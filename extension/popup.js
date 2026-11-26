@@ -1358,6 +1358,7 @@ function getServiceTagClass(serviceName, isCloud = false) {
   if (lower.includes("filekeeper")) return "tag-filekeeper";
   if (lower.includes("datanodes")) return "tag-datanodes";
   if (lower.includes("buzzheavier") || lower.includes("bzzhr")) return "tag-buzzheavier";
+  if (lower.includes("akirabox")) return "tag-akirabox";
   if (lower.includes("pixeldrain")) return "tag-pixeldrain";
   if (lower.includes("rootz")) return "tag-rootz";
   if (lower.includes("github") || lower.includes("깃허브")) return "tag-github";
@@ -1403,6 +1404,7 @@ const CLIPBOARD_HOSTING_PATTERNS = [
   /filekeeper\.net\/[a-zA-Z0-9_-]+/i,
   /datanodes\.to\/[a-zA-Z0-9_-]+/i,
   /(?:buzzheavier\.com|bzzhr\.to)\/[a-zA-Z0-9_-]+/i,
+  /akirabox\.(?:to|com|net)\/(?:[a-zA-Z0-9_-]+\/file|[a-zA-Z0-9_-]+)/i,
   /(?:vik[i1]ngf[i1]le\.[a-z]{2,})\/[fd]\//i,
   /megaup\.net\//i,
   /(?:pixeldrain\.(?:com|net)\/(?:u|l|d|api\/file)\/|pixeldra\.in\/)/i,
@@ -1699,6 +1701,50 @@ async function sendCurrentTab() {
       }
     }
 
+    // AkiraBox 페이지인 경우 #download 요소 및 파일명 직접 검사
+    const isAkiraBox = /akirabox\.(?:to|com|net)/i.test(tab.url);
+    if (isAkiraBox && tab.id) {
+      try {
+        const akiraRes = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            let fileName = "";
+            const h1 = document.querySelector("h1");
+            if (h1 && h1.innerText && h1.innerText.trim()) {
+              fileName = h1.innerText.trim();
+            } else if (document.title) {
+              fileName = document.title.replace(/\s*·\s*AkiraBox.*$/i, "").trim();
+            }
+            const btn = document.querySelector("#download, a.download-button");
+            const hasDirect = btn && btn.href && btn.href.startsWith("http") && !btn.href.endsWith("#") && !btn.href.endsWith("/file");
+            return {
+              direct_url: hasDirect ? btn.href : "",
+              filename: fileName,
+            };
+          },
+        });
+        if (akiraRes && akiraRes[0] && akiraRes[0].result) {
+          const resObj = akiraRes[0].result;
+          const targetLink = resObj.direct_url || tab.url;
+          const resolvedFilename = resObj.filename || "";
+          const resData = await sendUrl(targetLink, subfolder, "", "", tab.url, tab.title || "", tab.url, resolvedFilename);
+          clearSubfolderInputsAndContext();
+          sendCurrentTabBtn.innerHTML = `<span>✓ 전송 완료!</span>`;
+          showPopupToast(`✅ AkiraBox 작업이 서버로 전송되었습니다! (${resolvedFilename || "전송 완료"})`);
+          setTimeout(() => {
+            sendCurrentTabBtn.disabled = false;
+            sendCurrentTabBtn.innerHTML = originalHtml;
+          }, 1400);
+
+          switchToActiveTab();
+          await fetchJobs();
+          return;
+        }
+      } catch (akiraErr) {
+        console.warn("AkiraBox 직링크 사전 추출 건너뜀:", akiraErr);
+      }
+    }
+
     const resData = await sendUrl(tab.url, subfolder, "", "", tab.url, tab.title || "", tab.url);
     clearSubfolderInputsAndContext();
     sendCurrentTabBtn.innerHTML = `<span>✓ 전송 완료!</span>`;
@@ -1972,6 +2018,7 @@ async function extractPageDownloadLinksInPage() {
     { service: "FileKeeper", regex: /filekeeper\.net\/[a-zA-Z0-9_-]+/i },
     { service: "DataNodes", regex: /datanodes\.to\/[a-zA-Z0-9_-]+/i },
     { service: "Buzzheavier", regex: /(?:buzzheavier\.com|bzzhr\.to)\/[a-zA-Z0-9_-]+/i },
+    { service: "AkiraBox", regex: /akirabox\.(?:to|com|net)\/(?:[a-zA-Z0-9_-]+\/file|[a-zA-Z0-9_-]+)/i },
     { service: "VikingFile", regex: /(?:vik[i1]ngf[i1]le\.[a-z]{2,})\/[fd]\//i },
     { service: "MegaUp", regex: /megaup\.net\//i },
     { service: "Pixeldrain", regex: /pixeldrain\.com\/u\//i },

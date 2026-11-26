@@ -10,7 +10,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
-from ..engine import sanitize_filename, sanitize_folder_name
+from ..engine import extract_filename_from_headers, sanitize_filename, sanitize_folder_name
 from .base import BaseResolver
 
 logger = logging.getLogger(__name__)
@@ -260,6 +260,57 @@ class GoogleDriveResolver(BaseResolver):
                             logger.info(
                                 f"[GoogleDriveResolver] 대용량 바이러스 경고 폼 파싱 완료: {final_url}"
                             )
+
+                    # 발급된 직링크 유효성 및 Quota 초과 여부 즉시 검증
+                    if final_url and ("confirm=" in final_url or "uuid=" in final_url):
+                        try:
+                            chk_resp = session.get(final_url, stream=True, timeout=10)
+                            chk_ct = chk_resp.headers.get("Content-Type", "").lower()
+                            chk_cd = str(chk_resp.headers.get("Content-Disposition") or "")
+                            is_chk_attach = "attachment" in chk_cd.lower()
+
+                            if "text/html" in chk_ct and not is_chk_attach:
+                                chk_text = chk_resp.text[:4000]
+                                if (
+                                    "Too many users" in chk_text
+                                    or "Quota exceeded" in chk_text
+                                    or "최근에 너무 많은 사용자" in chk_text
+                                    or "용량 초과" in chk_text
+                                ):
+                                    raise PermissionError(
+                                        "Google Drive 일일 다운로드 할당량(24시간)이 초과되어 현재 직접 다운로드할 수 없습니다. "
+                                        "(최근에 너무 많은 사용자가 이 파일을 보거나 다운로드했습니다.)\n\n"
+                                        "💡 [우회 다운로드 방법 - 사본 만들기]:\n"
+                                        "1. 웹 브라우저에서 본인 구글 계정으로 로그인한 상태로 해당 파일 링크를 엽니다.\n"
+                                        "2. 우측 상단의 '내 드라이브에 바로가기 추가' 또는 메뉴에서 '사본 만들기(Make a copy)'를 실행합니다.\n"
+                                        "3. 내 드라이브에 새로 생성된 사본 파일('사본 - ...')의 공유 링크를 원격 다운로더에 입력하시면 대역폭 제한 없이 즉시 다운로드됩니다."
+                                    )
+                                if (
+                                    "infected with a virus" in chk_text.lower()
+                                    or "감염된 파일" in chk_text
+                                ):
+                                    raise PermissionError(
+                                        "Google Drive 파일 다운로드 불가: 구글 바이러스 검사에서 악성 파일로 감지되어 소유자 계정으로만 다운로드가 허용됩니다."
+                                    )
+                                if (
+                                    "You need access" in chk_text
+                                    or "액세스 권한 필요" in chk_text
+                                ):
+                                    raise PermissionError(
+                                        "Google Drive 파일 접근 권한이 필요합니다. 공유 설정을 확인하세요."
+                                    )
+                            else:
+                                cd_fn = extract_filename_from_headers(chk_resp.headers, None)
+                                if cd_fn:
+                                    filename = cd_fn
+                                cl = chk_resp.headers.get("Content-Length")
+                                if cl and str(cl).isdigit():
+                                    file_size = int(cl)
+                            chk_resp.close()
+                        except PermissionError:
+                            raise
+                        except Exception as e:
+                            logger.debug(f"[GoogleDriveResolver] 최종 직링크 사전 검증 중 예외 (무시): {e}")
                     else:
                         # 링크 기반 확인 토큰 추출 (#uc-download-link 등)
                         link = soup.select_one("#uc-download-link") or soup.select_one(

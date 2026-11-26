@@ -229,8 +229,11 @@ class Aria2HttpDownloadTask:
                     ).strip()
                     extracted_base = os.path.basename(clean_name)
                     if extracted_base and extracted_base != self.filename:
-                        self.filename = sanitize_filename(extracted_base)
-                        logger.info(f"[Aria2HTTP] 파일명 감지 (FILE): {self.filename}")
+                        # 이미 지정된 유효 파일명이 있고, aria2가 감지한 이름이 [_] ___ 등 ASCII 언더스코어 치환형이면 보존
+                        is_ascii_fallback = ("[_]" in extracted_base or "___" in extracted_base) and not ("[_]" in (self.filename or "") or "___" in (self.filename or ""))
+                        if not self.filename or (not is_ascii_fallback and "." not in self.filename and "." in extracted_base):
+                            self.filename = sanitize_filename(extracted_base)
+                            logger.info(f"[Aria2HTTP] 파일명 감지 (FILE): {self.filename}")
                 elif "Download complete:" in line:
                     m_comp = re.search(r"Download complete:\s*(.+)$", line)
                     if m_comp:
@@ -238,8 +241,10 @@ class Aria2HttpDownloadTask:
                             m_comp.group(1).strip().replace("\\", "/")
                         )
                         if extracted_base and extracted_base != self.filename:
-                            self.filename = sanitize_filename(extracted_base)
-                            logger.info(f"[Aria2HTTP] 파일명 감지 (Complete): {self.filename}")
+                            is_ascii_fallback = ("[_]" in extracted_base or "___" in extracted_base) and not ("[_]" in (self.filename or "") or "___" in (self.filename or ""))
+                            if not self.filename or (not is_ascii_fallback and "." not in self.filename and "." in extracted_base):
+                                self.filename = sanitize_filename(extracted_base)
+                                logger.info(f"[Aria2HTTP] 파일명 감지 (Complete): {self.filename}")
 
                 # 2. 진행 상태 요약 파싱
                 parsed = parse_aria2_summary_line(line)
@@ -354,6 +359,13 @@ class Aria2HttpDownloadTask:
                     pass
 
             if is_html:
+                html_sample = ""
+                try:
+                    with open(final_path, "r", encoding="utf-8", errors="ignore") as f:
+                        html_sample = f.read(4096)
+                except Exception:
+                    pass
+
                 logger.warning(
                     f"[Aria2HTTP] 다운로드 결과물이 웹페이지(HTML)로 감지되어 삭제합니다: {self.filename}"
                 )
@@ -361,6 +373,44 @@ class Aria2HttpDownloadTask:
                     self.cleanup_partial(self.dest_dir, self._work_id)
                 except OSError as err:
                     logger.warning("aria2 cleanup failed for html download: %s", err)
+
+                if (
+                    "Too many users" in html_sample
+                    or "Quota exceeded" in html_sample
+                    or "최근에 너무 많은 사용자" in html_sample
+                    or "용량 초과" in html_sample
+                ):
+                    return {
+                        "success": False,
+                        "status": "failed",
+                        "error": (
+                            "Google Drive 일일 다운로드 할당량(24시간)이 초과되어 현재 직접 다운로드할 수 없습니다. "
+                            "(최근에 너무 많은 사용자가 이 파일을 보거나 다운로드했습니다.)\n\n"
+                            "💡 [우회 다운로드 방법 - 사본 만들기]:\n"
+                            "1. 웹 브라우저에서 본인 구글 계정으로 로그인한 상태로 해당 파일 링크를 엽니다.\n"
+                            "2. 우측 상단의 '내 드라이브에 바로가기 추가' 또는 메뉴에서 '사본 만들기(Make a copy)'를 실행합니다.\n"
+                            "3. 내 드라이브에 새로 생성된 사본 파일('사본 - ...')의 공유 링크를 원격 다운로더에 입력하시면 대역폭 제한 없이 즉시 다운로드됩니다."
+                        ),
+                    }
+                if (
+                    "infected with a virus" in html_sample.lower()
+                    or "감염된 파일" in html_sample
+                ):
+                    return {
+                        "success": False,
+                        "status": "failed",
+                        "error": "Google Drive 파일 다운로드 불가: 구글 바이러스 검사에서 악성 파일로 감지되어 소유자 계정으로만 다운로드가 허용됩니다.",
+                    }
+                if (
+                    "You need access" in html_sample
+                    or "액세스 권한 필요" in html_sample
+                ):
+                    return {
+                        "success": False,
+                        "status": "failed",
+                        "error": "Google Drive 파일 접근 권한이 필요합니다. 공유 설정을 확인하세요.",
+                    }
+
                 return {
                     "success": False,
                     "status": "failed",

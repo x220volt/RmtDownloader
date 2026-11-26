@@ -546,6 +546,10 @@ body {
   background: rgba(20, 184, 166, 0.2);
   color: #2dd4bf;
 }
+.tag-akirabox {
+  background: rgba(225, 29, 72, 0.2);
+  color: #fb7185;
+}
 .tag-megaup {
   background: rgba(249, 115, 22, 0.2);
   color: #fb923c;
