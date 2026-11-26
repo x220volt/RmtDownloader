@@ -111,11 +111,25 @@ class GoogleDriveResolver(BaseResolver):
                 from config import load_settings
 
                 s = load_settings()
-                cookie_val = str(
-                    s.get("gdrive_cookie")
-                    or s.get("google_cookie")
-                    or ""
-                ).strip()
+                parts = []
+                if s.get("gdrive_sid"):
+                    sid = s["gdrive_sid"].strip()
+                    parts.append(f"SID={sid}" if "=" not in sid else sid)
+                if s.get("gdrive_hsid"):
+                    hsid = s["gdrive_hsid"].strip()
+                    parts.append(f"HSID={hsid}" if "=" not in hsid else hsid)
+                if s.get("gdrive_ssid"):
+                    ssid = s["gdrive_ssid"].strip()
+                    parts.append(f"SSID={ssid}" if "=" not in ssid else ssid)
+
+                if parts:
+                    cookie_val = "; ".join(parts)
+                else:
+                    cookie_val = str(
+                        s.get("gdrive_cookie")
+                        or s.get("google_cookie")
+                        or ""
+                    ).strip()
             except Exception:
                 pass
         if not cookie_val:
@@ -126,6 +140,9 @@ class GoogleDriveResolver(BaseResolver):
                 or os.environ.get("GOOGLE_COOKIE")
                 or ""
             ).strip()
+
+        if cookie_val and "=" not in cookie_val:
+            cookie_val = f"SID={cookie_val}"
 
         with requests.Session() as session:
             headers = {
@@ -417,11 +434,25 @@ class GoogleDriveResolver(BaseResolver):
                 from config import load_settings
 
                 s = load_settings()
-                cookie_val = str(
-                    s.get("gdrive_cookie")
-                    or s.get("google_cookie")
-                    or ""
-                ).strip()
+                parts = []
+                if s.get("gdrive_sid"):
+                    sid = s["gdrive_sid"].strip()
+                    parts.append(f"SID={sid}" if "=" not in sid else sid)
+                if s.get("gdrive_hsid"):
+                    hsid = s["gdrive_hsid"].strip()
+                    parts.append(f"HSID={hsid}" if "=" not in hsid else hsid)
+                if s.get("gdrive_ssid"):
+                    ssid = s["gdrive_ssid"].strip()
+                    parts.append(f"SSID={ssid}" if "=" not in ssid else ssid)
+
+                if parts:
+                    cookie_val = "; ".join(parts)
+                else:
+                    cookie_val = str(
+                        s.get("gdrive_cookie")
+                        or s.get("google_cookie")
+                        or ""
+                    ).strip()
             except Exception:
                 pass
         if not cookie_val:
@@ -430,6 +461,9 @@ class GoogleDriveResolver(BaseResolver):
                 or os.environ.get("GOOGLE_COOKIE")
                 or ""
             ).strip()
+
+        if cookie_val and "=" not in cookie_val:
+            cookie_val = f"SID={cookie_val}"
 
         with requests.Session() as session:
             headers = {

@@ -589,12 +589,39 @@
             <div class="settings-card" style="margin-bottom: 0;">
               <div class="settings-card-title">
                 <span class="badge" style="font-size: 0.8rem; padding: 4px 8px; background: rgba(59, 130, 246, 0.15); color: #3b82f6; border: 1px solid rgba(59, 130, 246, 0.3);">Google Drive</span>
-                <span>구글 드라이브 계정 로그인 쿠키</span>
+                <span>구글 드라이브 로그인 쿠키 (확장 프로그램 개별 입력 지원)</span>
               </div>
+
+              <!-- 쿠키 확장 프로그램 개별 입력 영역 -->
+              <div style="margin-bottom: 12px; background: rgba(59, 130, 246, 0.07); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-sm); padding: 12px 14px;">
+                <div style="font-weight: 700; color: #60a5fa; font-size: 0.84rem; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                  <span>🧩 쿠키 확장 프로그램(Cookie-Editor, EditThisCookie 등) 값 개별 입력</span>
+                </div>
+                <span class="form-help" style="margin-bottom: 10px; display: block; font-size: 0.78rem; line-height: 1.5; color: #cbd5e1;">
+                  확장 프로그램에 표시되는 쿠키 이름 중 <strong>SID</strong>, <strong>HSID</strong>, <strong>SSID</strong>의 값을 복사해 각각 입력하시면 시스템이 자동으로 구글 인증 규격에 맞게 조합하여 적용합니다.
+                </span>
+
+                <div class="form-group" style="margin-bottom: 8px;">
+                  <label class="form-label" for="settingGdriveSid" style="font-size: 0.8rem; margin-bottom: 3px; font-weight: 600; color: #93c5fd;">1. SID 값 (필수)</label>
+                  <input type="text" id="settingGdriveSid" class="form-input" placeholder="예: g.a000Ewny... (확장 프로그램의 SID Value 복사)" autocomplete="off">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="settingGdriveHsid" style="font-size: 0.8rem; margin-bottom: 3px; color: #cbd5e1;">2. HSID 값 (권장)</label>
+                    <input type="text" id="settingGdriveHsid" class="form-input" placeholder="확장 프로그램의 HSID Value 복사" autocomplete="off">
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label class="form-label" for="settingGdriveSsid" style="font-size: 0.8rem; margin-bottom: 3px; color: #cbd5e1;">3. SSID 값 (권장)</label>
+                    <input type="text" id="settingGdriveSsid" class="form-input" placeholder="확장 프로그램의 SSID Value 복사" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+
               <div class="form-group" style="margin-bottom: 0;">
-                <label class="form-label" for="settingGdriveCookie">Google Drive 로그인 쿠키 (선택사항)</label>
-                <input type="text" id="settingGdriveCookie" class="form-input" placeholder="브라우저 개발자도구(F12) ➔ Network 탭에서 drive.google.com 요청의 Cookie 헤더 전체 붙여넣기" autocomplete="off">
-                <span class="form-help">트래픽이 몰려 비로그인 시 '할당량 초과(Quota exceeded)'가 발생하는 구글 드라이브 공유 파일도 본인 구글 계정 쿠키를 등록하면 브라우저와 동일하게 정상 다운로드할 수 있습니다.</span>
+                <label class="form-label" for="settingGdriveCookie" style="font-size: 0.8rem; margin-bottom: 3px; color: var(--text-muted);">또는 전체 쿠키 직접 입력 (기존 방식)</label>
+                <input type="text" id="settingGdriveCookie" class="form-input" placeholder="SID=...; HSID=...; SSID=... 형태의 전체 쿠키 문자열" autocomplete="off">
+                <span class="form-help">트래픽이 몰려 비로그인 시 '할당량 초과(Quota exceeded)'가 발생하는 구글 드라이브 공유 파일도 쿠키를 등록하면 본인 구글 계정으로 정상 다운로드할 수 있습니다.</span>
               </div>
             </div>
           </div>

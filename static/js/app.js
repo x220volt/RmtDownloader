@@ -51,6 +51,9 @@ const settingGofileToken = document.getElementById('settingGofileToken');
 const settingTeraboxCookie = document.getElementById('settingTeraboxCookie');
 const settingNaverCafeCookie = document.getElementById('settingNaverCafeCookie');
 const settingGdriveCookie = document.getElementById('settingGdriveCookie');
+const settingGdriveSid = document.getElementById('settingGdriveSid');
+const settingGdriveHsid = document.getElementById('settingGdriveHsid');
+const settingGdriveSsid = document.getElementById('settingGdriveSsid');
 const toastContainer = document.getElementById('toastContainer');
 
 // ==========================================
@@ -1586,6 +1589,9 @@ async function openSettings() {
       if (settingTeraboxCookie) settingTeraboxCookie.value = data.terabox_cookie || '';
       if (settingNaverCafeCookie) settingNaverCafeCookie.value = data.naver_cafe_cookie || '';
       if (settingGdriveCookie) settingGdriveCookie.value = data.gdrive_cookie || '';
+      if (settingGdriveSid) settingGdriveSid.value = data.gdrive_sid || '';
+      if (settingGdriveHsid) settingGdriveHsid.value = data.gdrive_hsid || '';
+      if (settingGdriveSsid) settingGdriveSsid.value = data.gdrive_ssid || '';
       const autoPwdVal = data.auto_passwords || data.terabox_password || '';
       const settingAutoPasswords = document.getElementById('settingAutoPasswords');
       if (settingAutoPasswords) settingAutoPasswords.value = autoPwdVal;
@@ -1689,6 +1695,9 @@ async function saveSettings(e) {
     terabox_cookie: settingTeraboxCookie ? settingTeraboxCookie.value.trim() : '',
     naver_cafe_cookie: settingNaverCafeCookie ? settingNaverCafeCookie.value.trim() : '',
     gdrive_cookie: settingGdriveCookie ? settingGdriveCookie.value.trim() : '',
+    gdrive_sid: settingGdriveSid ? settingGdriveSid.value.trim() : '',
+    gdrive_hsid: settingGdriveHsid ? settingGdriveHsid.value.trim() : '',
+    gdrive_ssid: settingGdriveSsid ? settingGdriveSsid.value.trim() : '',
     auto_passwords: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
     terabox_password: document.getElementById('settingAutoPasswords') ? document.getElementById('settingAutoPasswords').value.trim() : (document.getElementById('settingTeraboxPassword') ? document.getElementById('settingTeraboxPassword').value.trim() : ''),
     terabox_mode: settingTeraboxMode ? settingTeraboxMode.value : 'download',
